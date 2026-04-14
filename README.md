@@ -34,10 +34,30 @@ uvicorn app.main:app --reload
 
 API runs at `http://127.0.0.1:8000`.
 
-## API Endpoints
+## FastAPI Built-In Routes
 
-- `GET /` returns a health-style message:
-  - Response: `{"message": "Hello, World!"}`
+When the server is running, FastAPI automatically provides:
+
+- `GET /docs` - Swagger UI (interactive API docs)
+- `GET /redoc` - ReDoc documentation
+- `GET /openapi.json` - OpenAPI schema JSON
+
+## App Routes
+
+Current route in this project:
+
+- `GET /` returns:
+  - `{"message": "Hello, World!"}`
+
+`/health` is not created automatically by FastAPI. It is a common custom route that you add yourself.
+
+Example:
+
+```python
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+```
 
 ## CORS
 
