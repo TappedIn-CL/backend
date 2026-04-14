@@ -1,69 +1,94 @@
 # TappedIn Backend
 
-FastAPI backend for the TappedIn project.
+FastAPI backend for TappedIn.
 
 ## Prerequisites
 
 - Python 3.11+
+- PostgreSQL running locally
 - `pip` and `venv`
 
-## Setup
+## 1) Create and activate a virtual environment
 
 From the `backend` directory:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+```
+
+## 2) Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-If you want to manage top-level dependencies and regenerate pinned versions:
+Top-level dependencies are tracked in `requirements.in`.
+If you add/remove a package, regenerate `requirements.txt`:
 
 ```bash
 pip install pip-tools
 pip-compile requirements.in --output-file requirements.txt
 ```
 
-## Run in Development
+## 3) Set up PostgreSQL database
 
-From `backend`:
+Create the database:
+
+```bash
+psql postgres
+CREATE DATABASE tappedin;
+\q
+```
+
+Create/update `backend/.env`:
+
+```env
+DATABASE_URL=postgresql://localhost:5432/tappedin
+```
+
+If your local Postgres requires credentials, use:
+
+```env
+DATABASE_URL=postgresql://<username>:<password>@localhost:5432/tappedin
+```
+
+## 4) Run development server
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-API runs at `http://127.0.0.1:8000`.
+API base URL: `http://127.0.0.1:8000`
+
+## API Routes
+
+- `GET /` - basic service status message
+- `POST /users/` - create a user
+  - request body:
+    ```json
+    {
+      "username": "alice",
+      "password": "secret123"
+    }
+    ```
 
 ## FastAPI Built-In Routes
 
-When the server is running, FastAPI automatically provides:
-
-- `GET /docs` - Swagger UI (interactive API docs)
-- `GET /redoc` - ReDoc documentation
-- `GET /openapi.json` - OpenAPI schema JSON
-
-## App Routes
-
-Current route in this project:
-
-- `GET /` returns:
-  - `{"message": "Hello, World!"}`
-
-`/health` is not created automatically by FastAPI. It is a common custom route that you add yourself.
-
-Example:
-
-```python
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-```
+- `GET /docs` - Swagger UI
+- `GET /redoc` - ReDoc
+- `GET /openapi.json` - OpenAPI schema
 
 ## CORS
 
-The app currently allows local frontend origins:
+Allowed local frontend origins:
 
 - `http://localhost:5173`
 - `http://localhost:3000`
 
-Keep only the origins you actually use in local development.
+## Troubleshooting
+
+- `sqlalchemy.exc.ArgumentError: Expected string or URL object, got None`
+  - `DATABASE_URL` is missing or `.env` is empty.
+- Connection refused to Postgres
+  - Ensure PostgreSQL is running and `tappedin` database exists.
