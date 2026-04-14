@@ -53,7 +53,36 @@ If your local Postgres requires credentials, use:
 DATABASE_URL=postgresql://<username>:<password>@localhost:5432/tappedin
 ```
 
-## 4) Run development server
+## 4) Run Alembic migrations
+
+This project now uses Alembic for schema migrations.
+
+Apply all migrations to your database:
+
+```bash
+alembic upgrade head
+```
+
+Create a new migration after model changes:
+
+```bash
+alembic revision --autogenerate -m "describe your change"
+```
+
+Then apply it:
+
+```bash
+alembic upgrade head
+```
+
+Useful commands:
+
+```bash
+alembic current
+alembic history
+```
+
+## 5) Run development server
 
 ```bash
 uvicorn app.main:app --reload
@@ -64,7 +93,7 @@ API base URL: `http://127.0.0.1:8000`
 ## API Routes
 
 - `GET /` - basic service status message
-- `POST /users/` - create a user
+- `POST /users` - create a user
   - request body:
     ```json
     {
@@ -92,3 +121,5 @@ Allowed local frontend origins:
   - `DATABASE_URL` is missing or `.env` is empty.
 - Connection refused to Postgres
   - Ensure PostgreSQL is running and `tappedin` database exists.
+- Alembic migration command fails with import/path errors
+  - Run commands from the `backend` directory and confirm `DATABASE_URL` is set in `.env`.

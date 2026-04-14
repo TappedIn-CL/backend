@@ -1,6 +1,8 @@
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt has a 72-byte input limit. bcrypt_sha256 pre-hashes first and then
+# uses bcrypt, so long user passwords are handled safely.
+pwd_context = CryptContext(schemes=["bcrypt_sha256"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)

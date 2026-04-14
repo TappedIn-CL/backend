@@ -30,11 +30,6 @@ app.add_middleware(
 )
 
 # -------------------------
-# Create database tables
-# -------------------------
-Base.metadata.create_all(bind=engine)
-
-# -------------------------
 # Include API routes
 # -------------------------
 app.include_router(user_router, prefix="/users", tags=["users"])

@@ -7,7 +7,7 @@ from core.security import hash_password
 
 router = APIRouter()
 
-@router.post("/", response_model=UserResponse)
+@router.post("", response_model=UserResponse)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
     existing_user = db.query(User).filter(User.username == user.username).first()
