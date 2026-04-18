@@ -10,15 +10,20 @@ router = APIRouter()
 @router.post("", response_model=UserResponse)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
-    existing_user = db.query(User).filter(User.username == user.username).first()
-    if existing_user:
+    existing_username = db.query(User).filter(User.username == user.username).first()
+    if existing_username:
         raise HTTPException(status_code=400, detail="Username already taken")
-        
+
+    existing_email = db.query(User).filter(User.email == user.email).first()
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already taken")
+
     hashed_pw = hash_password(user.password)
 
     db_user = User(
+        email=user.email,
         username=user.username,
-        password=hashed_pw
+        password=hashed_pw,
     )
 
     db.add(db_user)

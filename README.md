@@ -97,6 +97,7 @@ API base URL: `http://127.0.0.1:8000`
   - request body:
     ```json
     {
+      "email": "alice@example.com",
       "username": "alice",
       "password": "secret123"
     }
