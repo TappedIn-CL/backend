@@ -45,6 +45,8 @@ Create/update `backend/.env`:
 
 ```env
 DATABASE_URL=postgresql://localhost:5432/tappedin
+# Same project URL as the frontend (no /v1). Used to fetch JWKS for JWT verification.
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 ```
 
 If your local Postgres requires credentials, use:
@@ -93,15 +95,9 @@ API base URL: `http://127.0.0.1:8000`
 ## API Routes
 
 - `GET /` - basic service status message
-- `POST /users` - create a user
-  - request body:
-    ```json
-    {
-      "email": "alice@example.com",
-      "username": "alice",
-      "password": "secret123"
-    }
-    ```
+- `GET /users/me` - returns JWT claims for the signed-in user (requires `Authorization: Bearer <Supabase access_token>`)
+
+Profile rows in **`public.users`** are created by your Supabase **`auth.users`** trigger on sign-up (not via `POST /users`).
 
 ## FastAPI Built-In Routes
 
