@@ -75,7 +75,7 @@ class Event(Base):
                 + ", ".join(sorted(ALLOWED_SPECIAL_TAGS))
             )
         return value
-    
+
     @validates("vibe_tags")
     def validate_vibe_tags(self, key: str, value: str | None) -> str | None:
         if value is None:

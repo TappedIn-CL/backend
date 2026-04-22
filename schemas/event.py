@@ -35,6 +35,7 @@ VibeTag = Literal[
     "Educational",
 ]
 
+
 class EventCreate(BaseModel):
     title: str
     date: datetime
