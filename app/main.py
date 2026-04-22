@@ -6,8 +6,10 @@ from db.session import engine, Base
 
 # Import models (IMPORTANT for table creation)
 from app.models import user
+from app.models import event
 
 # Import routes
+from app.routers.event import router as event_router
 from app.routers.user import router as user_router
 
 
@@ -33,6 +35,7 @@ app.add_middleware(
 # Include API routes
 # -------------------------
 app.include_router(user_router, prefix="/users", tags=["users"])
+app.include_router(event_router, prefix="/events", tags=["events"])
 
 # -------------------------
 # Root endpoint
