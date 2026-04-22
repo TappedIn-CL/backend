@@ -1,28 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from db.dependencies import get_db
-from app.models.user import User
-from schemas.user import UserCreate, UserResponse
-from core.security import hash_password
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+
+from auth.deps import get_jwt_payload
 
 router = APIRouter()
 
-@router.post("", response_model=UserResponse)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
-    existing_user = db.query(User).filter(User.username == user.username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already taken")
-        
-    hashed_pw = hash_password(user.password)
-
-    db_user = User(
-        username=user.username,
-        password=hashed_pw
-    )
-
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-
-    return db_user
+@router.get("/me")
+def read_me(payload: Annotated[dict, Depends(get_jwt_payload)]):
+    """Requires `Authorization: Bearer <Supabase access_token>`."""
+    return {
+        "sub": payload.get("sub"),
+        "email": payload.get("email"),
+        "role": payload.get("role"),
+    }
