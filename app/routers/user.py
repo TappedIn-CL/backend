@@ -14,20 +14,18 @@ def read_me(
     payload: Annotated[dict, Depends(get_jwt_payload)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    email = payload.get("email")
-    user = db.query(User).filter(User.email == email).first()
+    id = payload.get("sub")
+    user = db.query(User).filter(User.id == id).first()
 
-    if User:
+    if user:
         return {
             "id": user.id,
             "email": user.email,
             "username": user.username,
-            "date_of_birth": user.date_of_birth,
-            "pronouns": user.pronouns,
+            "age": user.age,
             "gender": user.gender,
-            "neighborhood": user.neighborhood,
-            "occupation": user.occupation,
-            "interests": user.interests or [],
+            "location": user.location,
+            "interests": user.interests,
         }
     
     return {"message": "user not found in database, but JWT is valid."}
