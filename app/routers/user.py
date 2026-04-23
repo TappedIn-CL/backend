@@ -18,6 +18,16 @@ def read_me(
     user = db.query(User).filter(User.email == email).first()
 
     if User:
-        return user
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "date_of_birth": user.date_of_birth,
+            "pronouns": user.pronouns,
+            "gender": user.gender,
+            "neighborhood": user.neighborhood,
+            "occupation": user.occupation,
+            "interests": user.interests or [],
+        }
     
     return {"message": "user not found in database, but JWT is valid."}
