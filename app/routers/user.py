@@ -22,9 +22,11 @@ def read_me(
             "id": user.id,
             "email": user.email,
             "username": user.username,
-            "age": user.age,
+            "date_of_birth": user.date_of_birth,
+            "pronouns": user.pronouns,
             "gender": user.gender,
-            "location": user.location,
+            "neighborhood": user.neighborhood,
+            "occupation": user.occupation,
             "interests": user.interests,
         }
     
