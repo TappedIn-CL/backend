@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.models.event import Event
@@ -12,8 +12,21 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[EventResponse])
-def list_events(db: Annotated[Session, Depends(get_db)]) -> list[EventResponse]:
+def list_events(
+    q: Annotated[str | None, Query()] = None,
+    db: Session = Depends(get_db),
+) -> list[EventResponse]:
     events = db.query(Event).order_by(Event.created_at.desc()).all()
+
+    if q and q.strip():
+        query = q.strip().casefold()
+        events = [
+            e for e in events
+            if query in " ".join(
+                v for v in (e.title, e.description, e.location, e.category) if v
+            ).casefold()
+        ]
+
     return events
 
 
