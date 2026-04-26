@@ -25,6 +25,9 @@ jobs:
           fi
 
       - name: Run scrapers
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           for script in scrapers/*.py; do
             [ "$(basename "$script")" = "__init__.py" ] && continue
