@@ -25,6 +25,7 @@ jobs:
           fi
 
       - name: Run scrapers
+<<<<<<< HEAD
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -32,9 +33,15 @@ jobs:
           PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           PYTHONUNBUFFERED: "1"
+=======
+>>>>>>> e126def (update ingest workflow to run all scrapers every 3 hours)
         run: |
           for script in scrapers/*.py; do
             [ "$(basename "$script")" = "__init__.py" ] && continue
             echo "Running $script"
             python "$script"
+<<<<<<< HEAD
           done
+=======
+          done
+>>>>>>> e126def (update ingest workflow to run all scrapers every 3 hours)
