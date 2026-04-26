@@ -24,5 +24,10 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      - name: Run Python script
-        run: python script.py  # TODO: update path when script is written
+      - name: Run scrapers
+        run: |
+          for script in scrapers/*.py; do
+            [ "$(basename "$script")" = "__init__.py" ] && continue
+            echo "Running $script"
+            python "$script"
+          done
