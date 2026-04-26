@@ -138,6 +138,7 @@ if __name__ == "__main__":
             if not text:
                 continue
             events = extract_events_with_openai(url, text)
+            print(f"  → OpenAI extracted {len(events)} event(s)")
             added = save_events_to_db(events)
             print(f"  → {added} events saved")
             total += added
