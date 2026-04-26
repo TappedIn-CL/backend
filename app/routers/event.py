@@ -10,6 +10,8 @@ from schemas.event import EventCreate, EventResponse
 
 router = APIRouter()
 
+_mock_events: dict[uuid.UUID, EventResponse] = {}
+
 
 @router.get("", response_model=list[EventResponse])
 def list_events(
