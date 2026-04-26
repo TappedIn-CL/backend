@@ -6,3 +6,5 @@ python-dotenv
 alembic
 python-jose[cryptography]
 requests
+beautifulsoup4
+openai
