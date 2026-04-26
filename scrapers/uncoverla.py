@@ -77,15 +77,18 @@ Return only valid JSON, no explanation. Example:
 
 
 def save_events_to_db(events):
+    print(f"  → OpenAI returned {len(events)} event(s)")
     db = SessionLocal()
     try:
         added = 0
         for e in events:
             if not e.get("title") or not e.get("date"):
+                print(f"    ✗ skipped (missing title/date): {e}")
                 continue
 
             exists = db.query(Event).filter(Event.title == e["title"]).first()
             if exists:
+                print(f"    ✗ duplicate: {e['title']}")
                 continue
 
             try:
@@ -96,7 +99,8 @@ def save_events_to_db(events):
                         date = date.replace(hour=time.hour, minute=time.minute)
                     except ValueError:
                         pass
-            except ValueError:
+            except ValueError as ex:
+                print(f"    ✗ bad date '{e.get('date')}' for '{e.get('title')}': {ex}")
                 continue
 
             event = Event(
@@ -108,6 +112,7 @@ def save_events_to_db(events):
                 category=e.get("category"),
             )
             db.add(event)
+            print(f"    ✓ saving: {e['title']}")
             added += 1
 
         db.commit()
