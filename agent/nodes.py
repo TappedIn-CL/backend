@@ -1,4 +1,6 @@
 from agent.state import AgentState, EventSchema
+from agent.embedding import embed_query
+from agent.pinecone_client import search_events
 
 
 MOCK_EVENTS: list[EventSchema] = [
@@ -95,13 +97,41 @@ def parse_intent(state: AgentState) -> AgentState:
 
 def retrieve_events(state: AgentState) -> AgentState:
     """
-    Node 2: Embeds the semantic query and retrieves candidate events.
-    Currently returns hardcoded mock events — Week 5 will wire up real Pinecone search.
+    Node 2: Embeds the semantic query and retrieves candidate events from Pinecone.
+    candidate_events are populated from Pinecone metadata. Full Supabase hydration
+    (description, address, image_url) is added by Allen's hydration step.
     """
+    query_text = state["semantic_query"] or state["query"]
+    vector = embed_query(query_text)
+    matches = search_events(vector, state["filters"], top_k=20)
+
+    candidate_events: list[EventSchema] = [
+        {
+            "id": m["id"],
+            "title": m["metadata"].get("title", ""),
+            "venue_name": m["metadata"].get("venue_name", ""),
+            "city": m["metadata"].get("city", ""),
+            "category": m["metadata"].get("category", ""),
+            "tags": m["metadata"].get("tags", []),
+            "price_min": m["metadata"].get("price_min", 0.0),
+            "price_max": m["metadata"].get("price_max", 0.0),
+            "latitude": m["metadata"].get("latitude", 0.0),
+            "longitude": m["metadata"].get("longitude", 0.0),
+            "description": "",
+            "vibe_tags": [],
+            "address": "",
+            "start_time": "",
+            "end_time": None,
+            "image_url": None,
+            "source_url": "",
+        }
+        for m in matches
+    ]
+
     return {
         **state,
-        "query_vector": [0.0] * 1536,
-        "candidate_events": MOCK_EVENTS,
+        "query_vector": vector,
+        "candidate_events": candidate_events,
     }
 
 
