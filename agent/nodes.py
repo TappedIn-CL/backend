@@ -141,10 +141,13 @@ def score_and_rank(state: AgentState) -> AgentState:
     Currently ranks by price (cheapest first) as a mock heuristic — Week 6 will add real scoring.
     """
     ranked = sorted(state["candidate_events"], key=lambda e: e["price_min"])
-    response = (
-        f"Found {len(ranked)} events matching '{state['query']}'. "
-        f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
-    )
+    if ranked:
+        response = (
+            f"Found {len(ranked)} events matching '{state['query']}'. "
+            f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
+        )
+    else:
+        response = f"No events found matching '{state['query']}'."
     return {
         **state,
         "ranked_events": ranked,
