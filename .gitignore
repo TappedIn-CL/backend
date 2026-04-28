@@ -210,7 +210,11 @@ marimo/_lsp/
 __marimo__/
 
 
+<<<<<<< HEAD
 .DS_Store
+=======
+
+>>>>>>> a03d598 (update: .gitignore and added embeddings documentation)
 docs/superpowers
 .claude
 CLAUDE.md
