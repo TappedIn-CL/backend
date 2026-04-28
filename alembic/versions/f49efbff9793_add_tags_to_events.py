@@ -1,8 +1,8 @@
 """add tags to events
 
-Revision ID: a5f8e2d9c1b3
-Revises: 7d92808d57ee
-Create Date: 2026-04-28 10:00:00.000000
+Revision ID: f49efbff9793
+Revises: ecd2ec068b81
+Create Date: 2026-04-28 13:27:44.402804
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a5f8e2d9c1b3'
-down_revision: Union[str, None] = '7d92808d57ee'
+revision: str = 'f49efbff9793'
+down_revision: Union[str, None] = 'ecd2ec068b81'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
