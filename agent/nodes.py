@@ -91,7 +91,7 @@ def parse_intent(state: AgentState) -> AgentState:
     return {
         **state,
         "semantic_query": state["query"],
-        "filters": {"source": "mock"},
+        "filters": {},
     }
 
 
