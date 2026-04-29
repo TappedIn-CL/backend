@@ -8,11 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 EventCategory = Literal[
     "Music",
     "Food & Drink",
-    "Art & Culture",
+    "Arts",
     "Nightlife",
     "Comedy",
     "Wellness",
     "Networking",
+    "Sports",
+    "Family",
+    "Comedy",
+    "Fashion",
+    "Other",
 ]
 
 SpecialTag = Literal[
