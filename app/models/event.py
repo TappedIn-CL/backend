@@ -11,11 +11,16 @@ from db.session import Base
 ALLOWED_EVENT_CATEGORIES = {
     "Music",
     "Food & Drink",
-    "Art & Culture",
+    "Arts",
     "Nightlife",
     "Comedy",
     "Wellness",
     "Networking",
+    "Sports",
+    "Family",
+    "Comedy",
+    "Fashion",
+    "Other",
 }
 
 ALLOWED_SPECIAL_TAGS = {
