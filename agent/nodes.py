@@ -104,10 +104,12 @@ def parse_intent(state: AgentState) -> AgentState:
             "tags": filters.get("tags", [])
         }
 
-    except Exception:
+    except Exception as e:
+        print(f"ERROR: {e}")
         # Fallback to pass-through on error
         semantic_query = query
-        filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
+        query_vector = None
+        structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
 
     return {
         **state,
