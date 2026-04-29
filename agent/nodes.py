@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import date, timedelta
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -22,12 +23,29 @@ EVENT_CATEGORIES = ["Music", "Art & Culture", "Food & Drink", "Comedy", "Nightli
 EVENT_TAGS = ["indoor", "outdoor", "free perks", "pop-up", "limited spots"]
 EVENT_VIBES = ["chill", "intimate", "creative", "social", "energetic", "hyped", "educational"]
 
-SYSTEM_PROMPT = """You are an event preference extractor. Given a user query about events, extract structured preferences.
+def _build_system_prompt(today: date) -> str:
+    tomorrow      = today + timedelta(days=1)
+    days_to_sat   = (5 - today.weekday()) % 7
+    this_saturday = today + timedelta(days=days_to_sat)
+    this_sunday   = this_saturday + timedelta(days=1)
+    next_saturday = this_saturday + timedelta(days=7)
+    next_sunday   = next_saturday + timedelta(days=1)
+
+    return """You are an event preference extractor. Given a user query about events, extract structured preferences.
 
 Event metadata available:
 - Categories: {categories}
 - Tags: {tags}
 - Vibes: {vibes}
+
+Today's date: {today} ({weekday})
+Use these pre-resolved date anchors:
+- "today"        → date_from: {today}, date_to: {today}
+- "tomorrow"     → date_from: {tomorrow}, date_to: {tomorrow}
+- "this weekend" → date_from: {this_sat}, date_to: {this_sun}
+- "next weekend" → date_from: {next_sat}, date_to: {next_sun}
+- Explicit dates like "May 16th", "June 3rd" → resolve using today's year ({year}); if the month has already passed this year, assume next year. Set date_from = date_to = that date.
+- If no date is mentioned → date_from: null, date_to: null
 
 Extract:
 1. semantic_query: A natural language string describing the event type, vibes, and atmosphere. This will be used for embedding search.
@@ -38,6 +56,8 @@ Extract:
    - categories: List of event categories (from available categories)
    - vibes: List of vibe tags (from available vibes)
    - tags: List of physical attributes (from available tags)
+   - date_from: ISO date string YYYY-MM-DD (null if not mentioned)
+   - date_to: ISO date string YYYY-MM-DD (null if not mentioned)
 
 Chip phrase mappings:
 - "foodie" → category: "Food & Drink"
@@ -49,10 +69,18 @@ Chip phrase mappings:
 
 Respond with valid JSON structure only, no additional text.
 """.format(
-    categories=", ".join(EVENT_CATEGORIES),
-    tags=", ".join(EVENT_TAGS),
-    vibes=", ".join(EVENT_VIBES),
-)
+        categories=", ".join(EVENT_CATEGORIES),
+        tags=", ".join(EVENT_TAGS),
+        vibes=", ".join(EVENT_VIBES),
+        today=today.isoformat(),
+        weekday=today.strftime("%A"),
+        tomorrow=tomorrow.isoformat(),
+        this_sat=this_saturday.isoformat(),
+        this_sun=this_sunday.isoformat(),
+        next_sat=next_saturday.isoformat(),
+        next_sun=next_sunday.isoformat(),
+        year=today.year,
+    )
 
 USER_PROMPT_TEMPLATE = """Extract preferences from this query: "{query}"
 
@@ -60,7 +88,7 @@ Example:
 Query: "chill outdoor jazz under $20 this weekend within 10 miles"
 {{
   "semantic_query": "chill outdoor jazz music event",
-  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"]}}
+  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"], "date_from": "2026-05-02", "date_to": "2026-05-03"}}
 }}
 
 """
@@ -77,10 +105,11 @@ def parse_intent(state: AgentState) -> AgentState:
 
     try:
         client = _get_chat_client()
+        system_prompt = _build_system_prompt(date.today())
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": USER_PROMPT_TEMPLATE.format(query=query)},
             ],
             response_format={"type": "json_object"},
@@ -101,7 +130,9 @@ def parse_intent(state: AgentState) -> AgentState:
             "age_restrictions": filters.get("age_restrictions"),
             "categories": filters.get("categories", []),
             "vibes": filters.get("vibes", []),
-            "tags": filters.get("tags", [])
+            "tags": filters.get("tags", []),
+            "date_from": filters.get("date_from"),
+            "date_to": filters.get("date_to"),
         }
 
     except Exception as e:
@@ -109,7 +140,7 @@ def parse_intent(state: AgentState) -> AgentState:
         # Fallback to pass-through on error
         semantic_query = query
         query_vector = None
-        structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
+        structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": [], "date_from": None, "date_to": None}
 
     return {
         **state,

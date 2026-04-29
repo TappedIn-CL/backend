@@ -3,7 +3,7 @@ import sys
 from agent.nodes import parse_intent
 
 # Change this prompt to test different inputs
-PROMPT = "indoor events for date night within 10 miles and under 500 bucks"
+PROMPT = "indoor events for date night within 10 miles and under 500 bucks on June 16th, I want to drink some alcohol and dance"
 
 # Allow overriding from command line: python scratch_parse_intent.py "your prompt here"
 query = sys.argv[1] if len(sys.argv) > 1 else PROMPT
