@@ -211,10 +211,14 @@ __marimo__/
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 .DS_Store
 =======
 
 >>>>>>> a03d598 (update: .gitignore and added embeddings documentation)
+=======
+.DS_Store
+>>>>>>> 7a96f2f (update: recommendation scorer)
 docs/superpowers
 .claude
 CLAUDE.md

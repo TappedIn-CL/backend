@@ -6,12 +6,14 @@ from dotenv import load_dotenv
 
 from agent.state import AgentState, EventSchema
 from agent.embedding import embed_query
+<<<<<<< HEAD
 from agent.pinecone_client import fetch_vectors, search_events
 from agent.scoring import score_events
+=======
+from agent.pinecone_client import search_events
+>>>>>>> 7a96f2f (update: recommendation scorer)
 
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 # Reuse OpenAI client pattern from embedding.py
 _chat_client: OpenAI | None = None
@@ -94,9 +96,16 @@ def parse_intent(state: AgentState) -> AgentState:
 
         result: IntentExtraction = json.loads(response.choices[0].message.content)
 
+<<<<<<< HEAD
         semantic_query = result.get("semantic_query", query)
         query_vector = embed_query(semantic_query)
 
+=======
+        # Get the first semantic query string (or fallback to original query)
+        semantic_query = result.get("semantic_query", query)
+        query_vector = embed_query(semantic_query)
+        
+>>>>>>> 7a96f2f (update: recommendation scorer)
         filters = result.get("filters", {})
 
         structured_filters = {
@@ -109,9 +118,15 @@ def parse_intent(state: AgentState) -> AgentState:
         }
 
     except Exception:
+<<<<<<< HEAD
         semantic_query = query
         query_vector = embed_query(query)
         structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
+=======
+        # Fallback to pass-through on error
+        semantic_query = query
+        filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
+>>>>>>> 7a96f2f (update: recommendation scorer)
 
     return {
         **state,
@@ -121,6 +136,90 @@ def parse_intent(state: AgentState) -> AgentState:
     }
 
 
+<<<<<<< HEAD
+=======
+
+MOCK_EVENTS: list[EventSchema] = [
+    {
+        "id": "evt-001",
+        "title": "Sunset Jazz at The Rooftop",
+        "description": "Live jazz quartet at a converted warehouse rooftop with skyline views.",
+        "category": "Music",
+        "tags": ["outdoor", "21+"],
+        "vibe_tags": ["chill", "intimate"],
+        "venue_name": "The Rooftop DTLA",
+        "address": "820 E 3rd St, Los Angeles, CA",
+        "city": "Los Angeles",
+        "latitude": 34.0443,
+        "longitude": -118.2356,
+        "price_min": 15.0,
+        "price_max": 15.0,
+        "start_time": "2026-04-25T19:00:00Z",
+        "end_time": "2026-04-25T23:00:00Z",
+        "image_url": "https://example.com/jazz.jpg",
+        "source_url": "https://eventbrite.com/e/jazz-rooftop",
+    },
+    {
+        "id": "evt-002",
+        "title": "DTLA Art Walk",
+        "description": "Free monthly gallery walk featuring local LA artists across 20+ galleries.",
+        "category": "Art & Culture",
+        "tags": ["outdoor", "free", "family-friendly"],
+        "vibe_tags": ["creative", "social"],
+        "venue_name": "Arts District",
+        "address": "Arts District, Los Angeles, CA",
+        "city": "Los Angeles",
+        "latitude": 34.0403,
+        "longitude": -118.2348,
+        "price_min": 0.0,
+        "price_max": 0.0,
+        "start_time": "2026-04-26T18:00:00Z",
+        "end_time": "2026-04-26T22:00:00Z",
+        "image_url": "https://example.com/artwalk.jpg",
+        "source_url": "https://downtownartwalk.org",
+    },
+    {
+        "id": "evt-003",
+        "title": "Thrift Popup in Sawtelle",
+        "description": "Curated vintage popup with 30+ local sellers. Affordable finds and good coffee.",
+        "category": "Food & Drink",
+        "tags": ["indoor", "pop-up", "free"],
+        "vibe_tags": ["chill", "creative"],
+        "venue_name": "Sawtelle Studio",
+        "address": "2130 Sawtelle Blvd, Los Angeles, CA",
+        "city": "Los Angeles",
+        "latitude": 34.0422,
+        "longitude": -118.4472,
+        "price_min": 0.0,
+        "price_max": 0.0,
+        "start_time": "2026-04-26T11:00:00Z",
+        "end_time": "2026-04-26T17:00:00Z",
+        "image_url": "https://example.com/thrift.jpg",
+        "source_url": "https://instagram.com/sawtelle-popup",
+    },
+    {
+        "id": "evt-004",
+        "title": "Comedy Night at Westwood Brewing",
+        "description": "Stand-up open mic with UCLA comedy club. Drinks, laughs, low key vibes.",
+        "category": "Comedy",
+        "tags": ["indoor", "21+"],
+        "vibe_tags": ["social", "energetic"],
+        "venue_name": "Westwood Brewing Co.",
+        "address": "1097 Glendon Ave, Los Angeles, CA",
+        "city": "Los Angeles",
+        "latitude": 34.0635,
+        "longitude": -118.4455,
+        "price_min": 10.0,
+        "price_max": 10.0,
+        "start_time": "2026-04-25T21:00:00Z",
+        "end_time": "2026-04-25T23:30:00Z",
+        "image_url": "https://example.com/comedy.jpg",
+        "source_url": "https://eventbrite.com/e/comedy-night",
+    },
+]
+
+
+>>>>>>> 7a96f2f (update: recommendation scorer)
 def retrieve_events(state: AgentState) -> AgentState:
     """
     Node 2: Embeds the semantic query and retrieves candidate events from Pinecone.
@@ -163,39 +262,16 @@ def retrieve_events(state: AgentState) -> AgentState:
 
 def score_and_rank(state: AgentState) -> AgentState:
     """
-    Node 3: Scores and ranks candidate events using cosine similarity blend.
-    Uses taste_vector from state if available (set by compute_taste node).
+    Node 3: Scores and ranks candidate events against the user query.
+    Currently ranks by price (cheapest first) as a mock heuristic — Week 6 will add real scoring.
     """
-    candidates = state["candidate_events"]
-    if not candidates:
-        return {
-            **state,
-            "ranked_events": [],
-            "response": f"No events found for '{state['query']}'.",
-        }
-
-    query_vector = state["query_vector"] or [0.0] * 1536
-    if not state["query_vector"]:
-        logger.warning("score_and_rank called with no query_vector; scoring will be arbitrary")
-    taste_vector = state.get("taste_vector")
-    event_ids = [e["id"] for e in candidates]
-    try:
-        event_vectors = fetch_vectors(event_ids)
-        ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
-    except Exception as e:
-        logger.error("Scoring failed, returning unranked candidates: %s", e)
-        return {
-            **state,
-            "ranked_events": list(candidates),
-            "response": f"Found {len(candidates)} events for '{state['query']}' (ranking unavailable).",
-        }
-
-    if ranked:
-        response = (
-            f"Found {len(ranked)} events matching '{state['query']}'. "
-            f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
-        )
-    else:
-        response = f"No scoreable events found for '{state['query']}'."
-
-    return {**state, "ranked_events": ranked, "response": response}
+    ranked = sorted(state["candidate_events"], key=lambda e: e["price_min"])
+    response = (
+        f"Found {len(ranked)} events matching '{state['query']}'. "
+        f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
+    )
+    return {
+        **state,
+        "ranked_events": ranked,
+        "response": response,
+    }
