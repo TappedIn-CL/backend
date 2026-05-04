@@ -29,3 +29,5 @@ class AgentState(TypedDict):
     candidate_events: list[EventSchema] # top-K results from Pinecone
     ranked_events: list[EventSchema]    # final scored + ranked events
     response: Optional[str]            # plain-English response to user
+    user_profile: Optional[dict]        # {"interests": [...], "favorited_tags": [...]}
+    taste_vector: Optional[list[float]] # computed by compute_taste node
