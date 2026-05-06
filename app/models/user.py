@@ -11,6 +11,8 @@ class User(Base):
     # account tab
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=True)
+    full_name = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
 
     # preferences tab
     vibes = Column(ARRAY(String), nullable=True)

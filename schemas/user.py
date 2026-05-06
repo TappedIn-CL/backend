@@ -2,13 +2,10 @@ from pydantic import BaseModel, EmailStr
 from uuid import UUID
 from datetime import date
 
-from sqlalchemy import Column
-
 class UserCreate(BaseModel):
+    # account tab
     email: EmailStr
     username: str | None = None
-
-    # account tab
     full_name: str | None = None
     phone_number: str | None = None
 
