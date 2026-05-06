@@ -51,6 +51,8 @@ class EventCreate(BaseModel):
     category: EventCategory | None = None
     special_tags: list[SpecialTag] | None = None
     vibe_tags: list[VibeTag] | None = None
+    source: str | None = None
+    source_id: str | None = None
 
 
 class EventResponse(BaseModel):
@@ -64,6 +66,8 @@ class EventResponse(BaseModel):
     category: EventCategory | None = None
     special_tags: list[SpecialTag] | None = None
     vibe_tags: list[VibeTag] | None = None
+    source: str | None = None
+    source_id: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

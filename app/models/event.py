@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, String
+from sqlalchemy import Column, DateTime, Float, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import validates
 from datetime import datetime
@@ -56,7 +56,13 @@ class Event(Base):
     category = Column(String, nullable=True)
     special_tags = Column(String, nullable=True)
     vibe_tags = Column(String, nullable=True)
+    source = Column(String, nullable=True)
+    source_id = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('source', 'source_id', name='uq_events_source_source_id'),
+    )
 
     @validates("category")
     def validate_category(self, key: str, value: str | None) -> str | None:
