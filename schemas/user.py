@@ -1,23 +1,33 @@
 from pydantic import BaseModel, EmailStr
-import uuid
+from uuid import UUID
+from datetime import date
+
+from sqlalchemy import Column
 
 class UserCreate(BaseModel):
     email: EmailStr
-    username: str
+    username: str | None = None
 
-    age: int | None = None
+    # user demographics
+    date_of_birth: date | None = None
+    pronouns: str | None = None
     gender: str | None = None
-    location: str | None = None
-    interests: str | None = None # comma-separated interests
+    neighborhood: str | None = None
+    occupation: str | None = None
+    interests: list[str] | None = None
 
 class UserResponse(BaseModel):
-    id: uuid.UUID
+    id: UUID
     email: EmailStr
     username: str | None = None
-    age: int | None = None
+    
+    # user demographics
+    date_of_birth: date | None = None
+    pronouns: str | None = None
     gender: str | None = None
-    location: str | None = None
-    interests: str | None = None  # comma-separated interests
+    neighborhood: str | None = None
+    occupation: str | None = None
+    interests: list[str] | None = None
 
     class Config:
         from_attributes = True
