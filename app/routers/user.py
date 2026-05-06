@@ -19,9 +19,24 @@ def read_me(
 
     if user:
         return {
+            # profile page
             "id": user.id,
             "email": user.email,
             "username": user.username,
+            "full_name": user.full_name,
+            "phone_number": user.phone_number,
+
+            # preferences tab
+            "vibes": user.vibes,
+            "search_radius": user.search_radius,
+            "price_range": user.price_range,
+            "preferred_days": user.preferred_days,
+            
+            "email_notifs": user.email_notifs,
+            "push_notifs": user.push_notifs,
+            "sms_notifs": user.sms_notifs,
+
+            # demographics tab
             "date_of_birth": user.date_of_birth,
             "pronouns": user.pronouns,
             "gender": user.gender,
