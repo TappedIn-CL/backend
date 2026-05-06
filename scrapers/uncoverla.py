@@ -11,6 +11,7 @@ from openai import OpenAI
 
 from db.session import SessionLocal
 from app.models.event import Event
+from app.utils.event_utils import deactivate_past_events
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -171,6 +172,12 @@ def save_events_to_db(events, article_url):
 
         db.commit()
         print(f"  → {inserted} events saved/updated, {skipped} skipped")
+        
+        # Deactivate any events whose date has passed
+        deactivated = deactivate_past_events(db)
+        if deactivated > 0:
+            print(f"  → Deactivated {deactivated} past event(s)")
+        
         return inserted
     finally:
         db.close()

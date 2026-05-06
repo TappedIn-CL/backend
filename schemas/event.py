@@ -52,6 +52,7 @@ class EventCreate(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    is_active: bool = True
 
 
 class EventResponse(BaseModel):
@@ -67,6 +68,7 @@ class EventResponse(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    is_active: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
