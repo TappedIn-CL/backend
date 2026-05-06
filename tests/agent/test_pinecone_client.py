@@ -1,5 +1,5 @@
-from unittest.mock import MagicMock, patch
-from agent.pinecone_client import _build_record, upsert_events, search_events
+from unittest.mock import patch, MagicMock
+from agent.pinecone_client import _build_record, upsert_events, search_events, fetch_vectors
 
 MOCK_EVENT = {
     "id": "evt-001",
@@ -119,3 +119,49 @@ def test_upsert_batch_retries_on_failure(mock_embed, mock_get_index, mock_sleep)
     assert count == 0
     assert mock_index.upsert.call_count == 4  # 4 total attempts
     assert mock_sleep.call_count == 3  # sleep 1s, 2s, 4s between attempts
+
+
+def test_fetch_vectors_returns_id_to_values_map():
+    mock_vec = MagicMock()
+    mock_vec.values = [0.5] * 1536
+    mock_result = MagicMock()
+    mock_result.vectors = {"evt-001": mock_vec}
+    mock_index = MagicMock()
+    mock_index.fetch.return_value = mock_result
+
+    with patch("agent.pinecone_client._get_index", return_value=mock_index):
+        result = fetch_vectors(["evt-001"])
+
+    assert result == {"evt-001": [0.5] * 1536}
+    mock_index.fetch.assert_called_once_with(ids=["evt-001"])
+
+
+def test_fetch_vectors_empty_ids_returns_empty_dict():
+    mock_result = MagicMock()
+    mock_result.vectors = {}
+    mock_index = MagicMock()
+    mock_index.fetch.return_value = mock_result
+
+    with patch("agent.pinecone_client._get_index", return_value=mock_index):
+        result = fetch_vectors([])
+
+    assert result == {}
+    mock_index.fetch.assert_not_called()
+
+
+def test_fetch_vectors_multiple_ids():
+    mock_a = MagicMock()
+    mock_a.values = [1.0] * 1536
+    mock_b = MagicMock()
+    mock_b.values = [0.0] * 1536
+    mock_result = MagicMock()
+    mock_result.vectors = {"evt-a": mock_a, "evt-b": mock_b}
+    mock_index = MagicMock()
+    mock_index.fetch.return_value = mock_result
+
+    with patch("agent.pinecone_client._get_index", return_value=mock_index):
+        result = fetch_vectors(["evt-a", "evt-b"])
+
+    assert len(result) == 2
+    assert result["evt-a"] == [1.0] * 1536
+    assert result["evt-b"] == [0.0] * 1536

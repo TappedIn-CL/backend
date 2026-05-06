@@ -88,3 +88,12 @@ def search_events(
         {"id": m["id"], "score": m["score"], "metadata": m["metadata"]}
         for m in response["matches"]
     ]
+
+
+def fetch_vectors(ids: list[str]) -> dict[str, list[float]]:
+    """Batch-fetch event vectors by ID. IDs not found in the index are silently omitted."""
+    if not ids:
+        return {}
+    index = _get_index()
+    response = index.fetch(ids=ids)
+    return {vec_id: vec.values for vec_id, vec in response.vectors.items()}
