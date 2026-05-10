@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
@@ -17,6 +18,10 @@ async def query_agent(body: AgentQueryRequest):
         # -----------------------------------
         # Phase 1: parsing
         # -----------------------------------
+
+        start_time = time.time()
+        print(f"start time: {start_time}")
+
         yield {
             "event": "phase",
             "data": json.dumps({
@@ -24,13 +29,10 @@ async def query_agent(body: AgentQueryRequest):
             })
         }
 
-        parsed_query = {
-            "text": body.query,
-            "chips": body.chips
-        }
-
         # TODO: Implement parsing step
-        await asyncio.sleep(0.2)
+        print(f"query: {body.query}")
+        print(f"chips: {body.chips}")
+        await asyncio.sleep(5)
 
         # -----------------------------------
         # Phase 2: retrieving
@@ -43,7 +45,7 @@ async def query_agent(body: AgentQueryRequest):
         }
 
         #TODO: Implement retrieving step
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(5)
 
         # -----------------------------------
         # Phase 3: hydrating
@@ -56,7 +58,7 @@ async def query_agent(body: AgentQueryRequest):
         }
 
         #TODO: Implement hydrating step
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(5)
 
         # -----------------------------------
         # Phase 4: scoring
@@ -69,7 +71,7 @@ async def query_agent(body: AgentQueryRequest):
         }
 
         #TODO: Implement scoring step
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(5)
 
         # -----------------------------------
         # Final Results
@@ -79,7 +81,7 @@ async def query_agent(body: AgentQueryRequest):
             "data": json.dumps({
                 "events": [{}], # TODO: replace with actual events
                 "count": 10, # TODO: replace with actual count
-                "latency_ms": 1240 # TODO: replace with actual latency
+                "latency_ms": (time.time() - start_time) * 1000 # TODO: replace with actual latency
             })
         }
 
