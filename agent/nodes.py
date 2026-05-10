@@ -7,13 +7,20 @@ from dotenv import load_dotenv
 from agent.state import AgentState, EventSchema
 from agent.embedding import embed_query
 <<<<<<< HEAD
+<<<<<<< HEAD
 from agent.pinecone_client import fetch_vectors, search_events
 from agent.scoring import score_events
 =======
 from agent.pinecone_client import search_events
 >>>>>>> 7a96f2f (update: recommendation scorer)
+=======
+from agent.pinecone_client import search_events, fetch_vectors
+from agent.scoring import score_events
+>>>>>>> c679651 (fix: wire score_and_rank to real recommendation scorer)
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Reuse OpenAI client pattern from embedding.py
 _chat_client: OpenAI | None = None
@@ -262,16 +269,39 @@ def retrieve_events(state: AgentState) -> AgentState:
 
 def score_and_rank(state: AgentState) -> AgentState:
     """
-    Node 3: Scores and ranks candidate events against the user query.
-    Currently ranks by price (cheapest first) as a mock heuristic — Week 6 will add real scoring.
+    Node 3: Scores and ranks candidate events using cosine similarity blend.
+    Uses taste_vector from state if available (set by compute_taste node).
     """
-    ranked = sorted(state["candidate_events"], key=lambda e: e["price_min"])
-    response = (
-        f"Found {len(ranked)} events matching '{state['query']}'. "
-        f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
-    )
-    return {
-        **state,
-        "ranked_events": ranked,
-        "response": response,
-    }
+    candidates = state["candidate_events"]
+    if not candidates:
+        return {
+            **state,
+            "ranked_events": [],
+            "response": f"No events found for '{state['query']}'.",
+        }
+
+    query_vector = state["query_vector"] or [0.0] * 1536
+    if not state["query_vector"]:
+        logger.warning("score_and_rank called with no query_vector; scoring will be arbitrary")
+    taste_vector = state.get("taste_vector")
+    event_ids = [e["id"] for e in candidates]
+    try:
+        event_vectors = fetch_vectors(event_ids)
+        ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
+    except Exception as e:
+        logger.error("Scoring failed, returning unranked candidates: %s", e)
+        return {
+            **state,
+            "ranked_events": list(candidates),
+            "response": f"Found {len(candidates)} events for '{state['query']}' (ranking unavailable).",
+        }
+
+    if ranked:
+        response = (
+            f"Found {len(ranked)} events matching '{state['query']}'. "
+            f"Top pick: {ranked[0]['title']} at {ranked[0]['venue_name']}."
+        )
+    else:
+        response = f"No scoreable events found for '{state['query']}'."
+
+    return {**state, "ranked_events": ranked, "response": response}
