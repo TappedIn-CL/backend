@@ -73,7 +73,7 @@ Rules:
   - Output strict JSON only. No prose, no markdown fences, no comments.
   - Use exactly the spellings above (case-sensitive).
   - If the event is too ambiguous to classify confidently, default to:
-    category=Networking, tags=[], vibe_tags=["social"].
+    category=Other, tags=[], vibe_tags=["social"].
 """
 
 
@@ -95,8 +95,11 @@ def _validate_enrichment(payload: dict[str, Any]) -> dict[str, Any]:
     """
     category = payload.get("category")
     if category not in CATEGORIES:
-        logger.warning("LLM returned invalid category %r — defaulting to Networking", category)
-        category = "Networking"
+        # "Other" is the explicit catch-all bucket — using "Networking" as a
+        # fallback would silently pollute that category with unclassifiable
+        # events and skew searches for actual networking events.
+        logger.warning("LLM returned invalid category %r — defaulting to Other", category)
+        category = "Other"
 
     raw_tags = payload.get("tags") or []
     tags = [t for t in raw_tags if t in SPECIAL_TAGS]

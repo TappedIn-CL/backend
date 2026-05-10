@@ -43,7 +43,7 @@ def test_validate_enrichment_falls_back_on_bad_category():
         "tags": [],
         "vibe_tags": ["chill"],
     })
-    assert out["category"] == "Networking"
+    assert out["category"] == "Other"
 
 
 def test_validate_enrichment_caps_vibes_at_three():
@@ -94,7 +94,7 @@ def test_enrich_event_handles_malformed_json(mock_client):
 
     result = enrich_event(RAW_EVENT)
 
-    assert result["category"] == "Networking"
+    assert result["category"] == "Other"
     assert result["vibe_tags"] == ["social"]
 
 

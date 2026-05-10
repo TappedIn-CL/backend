@@ -52,7 +52,7 @@ CHIP_MAPPING: dict[str, ChipMapping] = {
         "semantic_phrase": "hype high-energy",
     },
     "Creative": {
-        "categories": ["Art & Culture"],
+        "categories": ["Arts"],
         "vibe_tags": ["creative"],
         "semantic_phrase": "creative artistic",
     },

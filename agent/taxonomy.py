@@ -14,12 +14,15 @@ When you change a list here, you must:
 CATEGORIES: list[str] = [
     "Music",
     "Food & Drink",
-    "Art & Culture",
+    "Arts",
     "Nightlife",
     "Comedy",
     "Wellness",
     "Networking",
     "Sports",
+    "Family",
+    "Fashion",
+    "Other",
 ]
 
 VIBE_TAGS: list[str] = [
