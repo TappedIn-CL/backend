@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from agent.nodes import retrieve_events, score_and_rank
+from agent.nodes import retrieve_events
 
 BASE_STATE = {
     "query": "chill outdoor event this weekend",
@@ -98,16 +98,26 @@ def test_retrieve_events_empty_pinecone_returns_empty_candidates(mock_embed, moc
 )
 @patch("agent.nodes.embed_query", return_value=[0.2] * 1536)
 def test_retrieve_events_passes_filters_to_search(mock_embed, mock_search):
-    state_with_filters = {**BASE_STATE, "filters": {"price_max": {"$lte": 0}}}
+    # parse_intent emits raw values; retrieve_events translates them into Pinecone's
+    # MongoDB-style filter operators before calling search_events.
+    state_with_filters = {
+        **BASE_STATE,
+        "filters": {"price_max": 0, "categories": ["Music"], "tags": ["outdoor"]},
+    }
     retrieve_events(state_with_filters)
-    mock_search.assert_called_once_with([0.2] * 1536, {"price_max": {"$lte": 0}}, top_k=20)
+    mock_search.assert_called_once_with(
+        [0.2] * 1536,
+        {
+            "price_max": {"$lte": 0},
+            "category": {"$in": ["Music"]},
+            "tags": {"$in": ["outdoor"]},
+        },
+        top_k=20,
+    )
 
 
-<<<<<<< HEAD
-=======
 from agent.nodes import score_and_rank
 
->>>>>>> 7a96f2f (update: recommendation scorer)
 _SCORE_BASE_STATE = {
     "query": "chill outdoor event",
     "semantic_query": "chill outdoor event",
@@ -163,20 +173,12 @@ _SCORE_BASE_STATE = {
 @patch(
     "agent.nodes.fetch_vectors",
     return_value={
-<<<<<<< HEAD
-        "evt-a": [1.0, 0.0] + [0.0] * 1534,
-        "evt-b": [0.0, 1.0] + [0.0] * 1534,
-    },
-)
-def test_score_and_rank_orders_by_cosine_not_price(mock_fetch):
-=======
         "evt-a": [1.0, 0.0] + [0.0] * 1534,  # aligns with query_vector
         "evt-b": [0.0, 1.0] + [0.0] * 1534,  # orthogonal to query_vector
     },
 )
 def test_score_and_rank_orders_by_cosine_not_price(mock_fetch):
     # evt-b is cheaper ($5) but evt-a aligns with query — should rank first
->>>>>>> 7a96f2f (update: recommendation scorer)
     result = score_and_rank(_SCORE_BASE_STATE)
     assert result["ranked_events"][0]["id"] == "evt-a"
     assert result["ranked_events"][1]["id"] == "evt-b"
@@ -205,13 +207,6 @@ def test_score_and_rank_sets_response_string(mock_fetch):
 @patch(
     "agent.nodes.fetch_vectors",
     return_value={
-<<<<<<< HEAD
-        "evt-a": [1.0, 0.0] + [0.0] * 1534,
-        "evt-b": [0.0, 1.0] + [0.0] * 1534,
-    },
-)
-def test_score_and_rank_uses_taste_vector_when_present(mock_fetch):
-=======
         "evt-a": [1.0, 0.0] + [0.0] * 1534,  # aligns with query
         "evt-b": [0.0, 1.0] + [0.0] * 1534,  # aligns with taste
     },
@@ -220,7 +215,6 @@ def test_score_and_rank_uses_taste_vector_when_present(mock_fetch):
     # With query=[1,0,...] and taste=[0,1,...]:
     # evt-a: 0.7*1.0 + 0.3*0.0 = 0.70 → ranks first
     # evt-b: 0.7*0.0 + 0.3*1.0 = 0.30 → ranks second
->>>>>>> 7a96f2f (update: recommendation scorer)
     state = {
         **_SCORE_BASE_STATE,
         "taste_vector": [0.0, 1.0] + [0.0] * 1534,

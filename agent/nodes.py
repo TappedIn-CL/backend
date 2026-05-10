@@ -6,17 +6,10 @@ from dotenv import load_dotenv
 
 from agent.state import AgentState, EventSchema
 from agent.embedding import embed_query
-<<<<<<< HEAD
-<<<<<<< HEAD
-from agent.pinecone_client import fetch_vectors, search_events
-from agent.scoring import score_events
-=======
-from agent.pinecone_client import search_events
->>>>>>> 7a96f2f (update: recommendation scorer)
-=======
 from agent.pinecone_client import search_events, fetch_vectors
 from agent.scoring import score_events
->>>>>>> c679651 (fix: wire score_and_rank to real recommendation scorer)
+from agent.taxonomy import CATEGORIES, VIBE_TAGS, SPECIAL_TAGS
+from agent.chip_mapping import merge_chips_into_query, chips_to_categories
 
 load_dotenv()
 
@@ -30,11 +23,6 @@ def _get_chat_client() -> OpenAI:
     if _chat_client is None:
         _chat_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     return _chat_client
-
-# Event metadata for prompt context
-EVENT_CATEGORIES = ["Music", "Art & Culture", "Food & Drink", "Comedy", "Nightlife", "Wellness", "Networking"]
-EVENT_TAGS = ["indoor", "outdoor", "free perks", "pop-up", "limited spots"]
-EVENT_VIBES = ["chill", "intimate", "creative", "social", "energetic", "hyped", "educational"]
 
 SYSTEM_PROMPT = """You are an event preference extractor. Given a user query about events, extract structured preferences.
 
@@ -57,15 +45,16 @@ Chip phrase mappings:
 - "foodie" → category: "Food & Drink"
 - "date night" → vibe_tags includes "intimate", keep phrase in semantic_query
 - "with friends" → vibe_tags includes "social", keep phrase in semantic_query
-- "solo" → vibe_tags includes "chill", keep phrase in semantic_query
+- "sports" → category: "Sports", vibe_tags includes "hyped"/"energetic"
+- "adventurous" → vibe_tags includes "adventurous"
 - "thrifty" / "cheap" → price_max: 20
 - "free" → price_max: 0
 
 Respond with valid JSON structure only, no additional text.
 """.format(
-    categories=", ".join(EVENT_CATEGORIES),
-    tags=", ".join(EVENT_TAGS),
-    vibes=", ".join(EVENT_VIBES),
+    categories=", ".join(CATEGORIES),
+    tags=", ".join(SPECIAL_TAGS),
+    vibes=", ".join(VIBE_TAGS),
 )
 
 USER_PROMPT_TEMPLATE = """Extract preferences from this query: "{query}"
@@ -84,10 +73,16 @@ IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
 
 def parse_intent(state: AgentState) -> AgentState:
     """
-    Node 1: Parses the user's raw query into semantic query strings + structured filters.
-    Uses LLM to extract intent from natural language.
+    Node 1: Parses the user's raw query + chips into a semantic query string +
+    structured filters.
+
+    Vibes are intentionally appended to semantic_query (for embedding search)
+    and NOT placed in the Pinecone filter dict. _build_record in
+    pinecone_client.py does not store vibe_tags in metadata, so a vibes hard
+    filter would silently match zero events.
     """
     query = state["query"]
+    chips = state.get("chips", []) or []
 
     try:
         client = _get_chat_client()
@@ -102,38 +97,45 @@ def parse_intent(state: AgentState) -> AgentState:
         )
 
         result: IntentExtraction = json.loads(response.choices[0].message.content)
+        llm_semantic_query = result.get("semantic_query", query) or query
+        llm_filters = result.get("filters", {}) or {}
 
-<<<<<<< HEAD
-        semantic_query = result.get("semantic_query", query)
-        query_vector = embed_query(semantic_query)
+        # Vibes go into the embedding text, not the filter dict
+        llm_vibes = llm_filters.get("vibes", []) or []
+        vibes_phrase = " ".join(llm_vibes)
 
-=======
-        # Get the first semantic query string (or fallback to original query)
-        semantic_query = result.get("semantic_query", query)
-        query_vector = embed_query(semantic_query)
-        
->>>>>>> 7a96f2f (update: recommendation scorer)
-        filters = result.get("filters", {})
+        # Merge chip-derived categories with LLM-extracted categories (dedup, preserve order)
+        llm_categories = llm_filters.get("categories", []) or []
+        chip_categories = chips_to_categories(chips)
+        merged_categories = list(dict.fromkeys([*llm_categories, *chip_categories]))
 
         structured_filters = {
-            "price_max": filters.get("price_max"),
-            "max_distance": filters.get("max_distance"),
-            "age_restrictions": filters.get("age_restrictions"),
-            "categories": filters.get("categories", []),
-            "vibes": filters.get("vibes", []),
-            "tags": filters.get("tags", [])
+            "price_max": llm_filters.get("price_max"),
+            "max_distance": llm_filters.get("max_distance"),
+            "age_restrictions": llm_filters.get("age_restrictions"),
+            "categories": merged_categories,
+            "tags": llm_filters.get("tags", []) or [],
+            # NOTE: vibes deliberately omitted — Pinecone metadata has no vibe_tags,
+            # so filtering on them is a silent no-op. They're folded into the embedding instead.
         }
 
-    except Exception:
-<<<<<<< HEAD
-        semantic_query = query
-        query_vector = embed_query(query)
-        structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
-=======
-        # Fallback to pass-through on error
-        semantic_query = query
-        filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
->>>>>>> 7a96f2f (update: recommendation scorer)
+        # Build the text that actually gets embedded:
+        #   LLM's cleaned semantic_query + LLM vibes (as text) + chip semantic_phrases
+        base_text = f"{llm_semantic_query} {vibes_phrase}".strip()
+        semantic_query = merge_chips_into_query(base_text, chips)
+
+    except Exception as e:
+        logger.warning("parse_intent LLM call failed, falling back: %s", e)
+        semantic_query = merge_chips_into_query(query, chips)
+        structured_filters = {
+            "price_max": None,
+            "max_distance": None,
+            "age_restrictions": None,
+            "categories": chips_to_categories(chips),
+            "tags": [],
+        }
+
+    query_vector = embed_query(semantic_query)
 
     return {
         **state,
@@ -143,8 +145,6 @@ def parse_intent(state: AgentState) -> AgentState:
     }
 
 
-<<<<<<< HEAD
-=======
 
 MOCK_EVENTS: list[EventSchema] = [
     {
@@ -226,7 +226,29 @@ MOCK_EVENTS: list[EventSchema] = [
 ]
 
 
->>>>>>> 7a96f2f (update: recommendation scorer)
+def _to_pinecone_filter(raw: dict) -> dict:
+    """
+    Translate parse_intent's structured filters into Pinecone's MongoDB-style
+    filter operators.
+
+    Pinecone metadata fields (from _build_record): start_time_unix, latitude,
+    longitude, price_min, price_max, city, category (singular!), tags, title,
+    venue_name. Anything else is dropped — max_distance and age_restrictions
+    are NOT Pinecone-filterable and would need post-query handling on lat/lng
+    or as tag matches respectively.
+    """
+    f: dict = {}
+    if raw.get("price_max") is not None:
+        f["price_max"] = {"$lte": raw["price_max"]}
+    categories = raw.get("categories") or []
+    if categories:
+        f["category"] = {"$in": categories}
+    tags = raw.get("tags") or []
+    if tags:
+        f["tags"] = {"$in": tags}
+    return f
+
+
 def retrieve_events(state: AgentState) -> AgentState:
     """
     Node 2: Embeds the semantic query and retrieves candidate events from Pinecone.
@@ -235,7 +257,8 @@ def retrieve_events(state: AgentState) -> AgentState:
     """
     query_text = state["semantic_query"] or state["query"]
     vector = embed_query(query_text)
-    matches = search_events(vector, state["filters"], top_k=20)
+    pinecone_filter = _to_pinecone_filter(state["filters"] or {})
+    matches = search_events(vector, pinecone_filter, top_k=20)
 
     candidate_events: list[EventSchema] = [
         {
