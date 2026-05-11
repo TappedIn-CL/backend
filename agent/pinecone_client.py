@@ -27,21 +27,24 @@ def _build_record(event: EventSchema, vector: list[float]) -> dict:
     start_time_unix = int(
         datetime.fromisoformat(event["start_time"].replace("Z", "+00:00")).timestamp()
     )
+    metadata = {
+        "start_time_unix": start_time_unix,
+        "latitude": event["latitude"],
+        "longitude": event["longitude"],
+        "price_min": event["price_min"],
+        "price_max": event["price_max"],
+        "city": event["city"],
+        "category": event["category"],
+        "tags": event["tags"],
+        "title": event["title"],
+        "venue_name": event["venue_name"],
+    }
+    # Pinecone rejects null metadata; drop any None-valued fields.
+    metadata = {k: v for k, v in metadata.items() if v is not None}
     return {
         "id": event["id"],
         "values": vector,
-        "metadata": {
-            "start_time_unix": start_time_unix,
-            "latitude": event["latitude"],
-            "longitude": event["longitude"],
-            "price_min": event["price_min"],
-            "price_max": event["price_max"],
-            "city": event["city"],
-            "category": event["category"],
-            "tags": event["tags"],
-            "title": event["title"],
-            "venue_name": event["venue_name"],
-        },
+        "metadata": metadata,
     }
 
 

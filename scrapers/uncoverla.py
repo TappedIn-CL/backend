@@ -176,11 +176,8 @@ def save_events_to_db(events, article_url):
         db.close()
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+def run_scrape() -> int:
+    """Scrape uncoverla, extract events with OpenAI, upsert into Supabase. Returns count."""
     print("Fetching article links...")
     links = get_article_links()
     print(f"Found {len(links)} articles")
@@ -201,3 +198,11 @@ if __name__ == "__main__":
             print(f"  → Error: {e}")
 
     print(f"\nDone. Total events saved/updated: {total}")
+    return total
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    run_scrape()
