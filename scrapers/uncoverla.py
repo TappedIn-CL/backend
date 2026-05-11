@@ -55,7 +55,7 @@ Extract each individual event mentioned and return a JSON array. Each event obje
 - "location": venue name and/or address (string or null)
 - "cost": numeric cost in dollars, 0 if free, null if not mentioned
 - "description": 1-2 sentence description (string)
-- "category": one of: Music, Food & Drink, Arts, Sports, Family, Fashion, Wellness, Nightlife, Other
+- "category": the single best-fit category from this exact list: Music, Nightlife, Sports, Food & Drink, Art & Culture, Comedy, Wellness, Networking. Pick the closest match even if no category is a perfect fit — every event must be assigned one of these eight.
 
 Return only valid JSON, no explanation. Example:
 [{{"title": "...", "date": "2026-04-25", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
@@ -77,15 +77,18 @@ Return only valid JSON, no explanation. Example:
 
 
 def save_events_to_db(events):
+    print(f"  → OpenAI returned {len(events)} event(s)")
     db = SessionLocal()
     try:
         added = 0
         for e in events:
             if not e.get("title") or not e.get("date"):
+                print(f"    ✗ skipped (missing title/date): {e}")
                 continue
 
             exists = db.query(Event).filter(Event.title == e["title"]).first()
             if exists:
+                print(f"    ✗ duplicate: {e['title']}")
                 continue
 
             try:
@@ -96,7 +99,8 @@ def save_events_to_db(events):
                         date = date.replace(hour=time.hour, minute=time.minute)
                     except ValueError:
                         pass
-            except ValueError:
+            except ValueError as ex:
+                print(f"    ✗ bad date '{e.get('date')}' for '{e.get('title')}': {ex}")
                 continue
 
             event = Event(
@@ -108,6 +112,7 @@ def save_events_to_db(events):
                 category=e.get("category"),
             )
             db.add(event)
+            print(f"    ✓ saving: {e['title']}")
             added += 1
 
         db.commit()
@@ -133,6 +138,7 @@ if __name__ == "__main__":
             if not text:
                 continue
             events = extract_events_with_openai(url, text)
+            print(f"  → OpenAI extracted {len(events)} event(s)")
             added = save_events_to_db(events)
             print(f"  → {added} events saved")
             total += added
