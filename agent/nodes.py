@@ -1,7 +1,8 @@
+import asyncio
 import json
 import logging
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 from agent.state import AgentState, EventSchema
@@ -15,13 +16,15 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# Reuse OpenAI client pattern from embedding.py
-_chat_client: OpenAI | None = None
+MAX_HYDRATION_BATCH = 100
 
-def _get_chat_client() -> OpenAI:
+# Reuse OpenAI client pattern from embedding.py
+_chat_client: AsyncOpenAI | None = None
+
+def _get_chat_client() -> AsyncOpenAI:
     global _chat_client
     if _chat_client is None:
-        _chat_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        _chat_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     return _chat_client
 
 SYSTEM_PROMPT = """You are an event preference extractor. Given a user query about events, extract structured preferences.
@@ -71,7 +74,7 @@ Query: "chill outdoor jazz under $20 this weekend within 10 miles"
 IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
 
 
-def parse_intent(state: AgentState) -> AgentState:
+async def parse_intent(state: AgentState) -> AgentState:
     """
     Node 1: Parses the user's raw query + chips into a semantic query string +
     structured filters.
@@ -86,7 +89,7 @@ def parse_intent(state: AgentState) -> AgentState:
 
     try:
         client = _get_chat_client()
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -135,7 +138,7 @@ def parse_intent(state: AgentState) -> AgentState:
             "tags": [],
         }
 
-    query_vector = embed_query(semantic_query)
+    query_vector = await asyncio.to_thread(embed_query, semantic_query)
 
     return {
         **state,
@@ -143,87 +146,6 @@ def parse_intent(state: AgentState) -> AgentState:
         "query_vector": query_vector,
         "filters": structured_filters,
     }
-
-
-
-MOCK_EVENTS: list[EventSchema] = [
-    {
-        "id": "evt-001",
-        "title": "Sunset Jazz at The Rooftop",
-        "description": "Live jazz quartet at a converted warehouse rooftop with skyline views.",
-        "category": "Music",
-        "tags": ["outdoor", "21+"],
-        "vibe_tags": ["chill", "intimate"],
-        "venue_name": "The Rooftop DTLA",
-        "address": "820 E 3rd St, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0443,
-        "longitude": -118.2356,
-        "price_min": 15.0,
-        "price_max": 15.0,
-        "start_time": "2026-04-25T19:00:00Z",
-        "end_time": "2026-04-25T23:00:00Z",
-        "image_url": "https://example.com/jazz.jpg",
-        "source_url": "https://eventbrite.com/e/jazz-rooftop",
-    },
-    {
-        "id": "evt-002",
-        "title": "DTLA Art Walk",
-        "description": "Free monthly gallery walk featuring local LA artists across 20+ galleries.",
-        "category": "Art & Culture",
-        "tags": ["outdoor", "free", "family-friendly"],
-        "vibe_tags": ["creative", "social"],
-        "venue_name": "Arts District",
-        "address": "Arts District, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0403,
-        "longitude": -118.2348,
-        "price_min": 0.0,
-        "price_max": 0.0,
-        "start_time": "2026-04-26T18:00:00Z",
-        "end_time": "2026-04-26T22:00:00Z",
-        "image_url": "https://example.com/artwalk.jpg",
-        "source_url": "https://downtownartwalk.org",
-    },
-    {
-        "id": "evt-003",
-        "title": "Thrift Popup in Sawtelle",
-        "description": "Curated vintage popup with 30+ local sellers. Affordable finds and good coffee.",
-        "category": "Food & Drink",
-        "tags": ["indoor", "pop-up", "free"],
-        "vibe_tags": ["chill", "creative"],
-        "venue_name": "Sawtelle Studio",
-        "address": "2130 Sawtelle Blvd, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0422,
-        "longitude": -118.4472,
-        "price_min": 0.0,
-        "price_max": 0.0,
-        "start_time": "2026-04-26T11:00:00Z",
-        "end_time": "2026-04-26T17:00:00Z",
-        "image_url": "https://example.com/thrift.jpg",
-        "source_url": "https://instagram.com/sawtelle-popup",
-    },
-    {
-        "id": "evt-004",
-        "title": "Comedy Night at Westwood Brewing",
-        "description": "Stand-up open mic with UCLA comedy club. Drinks, laughs, low key vibes.",
-        "category": "Comedy",
-        "tags": ["indoor", "21+"],
-        "vibe_tags": ["social", "energetic"],
-        "venue_name": "Westwood Brewing Co.",
-        "address": "1097 Glendon Ave, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0635,
-        "longitude": -118.4455,
-        "price_min": 10.0,
-        "price_max": 10.0,
-        "start_time": "2026-04-25T21:00:00Z",
-        "end_time": "2026-04-25T23:30:00Z",
-        "image_url": "https://example.com/comedy.jpg",
-        "source_url": "https://eventbrite.com/e/comedy-night",
-    },
-]
 
 
 def _to_pinecone_filter(raw: dict) -> dict:
@@ -249,16 +171,18 @@ def _to_pinecone_filter(raw: dict) -> dict:
     return f
 
 
-def retrieve_events(state: AgentState) -> AgentState:
+async def retrieve_events(state: AgentState) -> AgentState:
     """
-    Node 2: Embeds the semantic query and retrieves candidate events from Pinecone.
-    candidate_events are populated from Pinecone metadata. Full Supabase hydration
-    (description, address, image_url) is added by Allen's hydration step.
+    Node 2: Retrieves candidate events from Pinecone using the vector
+    already computed by parse_intent.
     """
-    query_text = state["semantic_query"] or state["query"]
-    vector = embed_query(query_text)
+    vector = state["query_vector"]
+    if not vector:
+        query_text = state["semantic_query"] or state["query"]
+        vector = await asyncio.to_thread(embed_query, query_text)
+
     pinecone_filter = _to_pinecone_filter(state["filters"] or {})
-    matches = search_events(vector, pinecone_filter, top_k=20)
+    matches = await asyncio.to_thread(search_events, vector, pinecone_filter, top_k=20)
 
     candidate_events: list[EventSchema] = [
         {
@@ -290,12 +214,78 @@ def retrieve_events(state: AgentState) -> AgentState:
     }
 
 
-def score_and_rank(state: AgentState) -> AgentState:
+async def hydrate_events(state: AgentState) -> AgentState:
     """
-    Node 3: Scores and ranks candidate events using cosine similarity blend.
+    Node 3: Fetch full event rows directly from the database.
+    This populates description, address, image_url, and vibe_tags which are
+    not stored in Pinecone metadata.
+    """
+    candidates = state.get("candidate_events") or []
+    if not candidates:
+        return {**state, "hydrated_events": []}
+
+    ids = [e["id"] for e in candidates][:MAX_HYDRATION_BATCH]
+
+    try:
+        from db.session import SessionLocal
+        from app.models.event import Event
+        from app.utils.event_utils import event_to_hydrated
+        import uuid as uuid_mod
+
+        def _fetch_from_db():
+            db = SessionLocal()
+            try:
+                parsed_ids = [uuid_mod.UUID(i) for i in ids]
+                events = db.query(Event).filter(Event.id.in_(parsed_ids)).all()
+                by_id = {str(e.id): e for e in events}
+                return {
+                    eid: {
+                        "id": str(e.id),
+                        "title": e.title,
+                        "description": e.description or "",
+                        "category": e.category or "",
+                        "tags": [t.strip() for t in (e.special_tags or "").split(",") if t.strip()],
+                        "vibe_tags": [t.strip() for t in (e.vibe_tags or "").split(",") if t.strip()],
+                        "venue_name": e.location or "",
+                        "address": e.location or "",
+                        "city": "Los Angeles",
+                        "latitude": 0.0,
+                        "longitude": 0.0,
+                        "price_min": e.cost or 0.0,
+                        "price_max": e.cost or 0.0,
+                        "start_time": e.date.isoformat() if e.date else "",
+                        "end_time": None,
+                        "image_url": None,
+                        "source_url": "",
+                    }
+                    for eid, e in by_id.items()
+                }
+            finally:
+                db.close()
+
+        rows_by_id = await asyncio.to_thread(_fetch_from_db)
+
+        hydrated: list[EventSchema] = []
+        for candidate in candidates:
+            full = rows_by_id.get(candidate["id"])
+            if full is None:
+                hydrated.append(candidate)
+            else:
+                hydrated.append({**candidate, **full})
+
+    except Exception as e:
+        logger.error("Hydration failed, returning sparse candidates: %s", e)
+        hydrated = list(candidates)
+
+    return {**state, "hydrated_events": hydrated}
+
+
+async def score_and_rank(state: AgentState) -> AgentState:
+    """
+    Node 4: Scores and ranks candidate events using cosine similarity blend.
     Uses taste_vector from state if available (set by compute_taste node).
     """
-    candidates = state["candidate_events"]
+    candidates = state.get("hydrated_events") or state.get("candidate_events") or []
     if not candidates:
         return {
             **state,
@@ -306,10 +296,11 @@ def score_and_rank(state: AgentState) -> AgentState:
     query_vector = state["query_vector"] or [0.0] * 1536
     if not state["query_vector"]:
         logger.warning("score_and_rank called with no query_vector; scoring will be arbitrary")
+    
     taste_vector = state.get("taste_vector")
     event_ids = [e["id"] for e in candidates]
     try:
-        event_vectors = fetch_vectors(event_ids)
+        event_vectors = await asyncio.to_thread(fetch_vectors, event_ids)
         ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
     except Exception as e:
         logger.error("Scoring failed, returning unranked candidates: %s", e)

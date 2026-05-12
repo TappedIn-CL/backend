@@ -27,6 +27,21 @@ def get_jwt_payload(token: Annotated[str, Depends(get_bearer_token)]) -> dict:
     return verify_jwt(token)
 
 
+def get_optional_jwt_payload(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(security),
+    ],
+) -> dict | None:
+    """Returns JWT claims if a valid token is present, None otherwise."""
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        return None
+    try:
+        return verify_jwt(credentials.credentials)
+    except HTTPException:
+        return None
+
+
 def get_supabase_sub(
     payload: Annotated[dict, Depends(get_jwt_payload)],
 ) -> str:

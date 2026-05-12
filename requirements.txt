@@ -45,6 +45,7 @@ Pygments==2.20.0
 pytest==9.0.3
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+python-jose[cryptography]==3.4.0
 PyYAML==6.0.3
 requests==2.33.1
 requests-toolbelt==1.0.0
