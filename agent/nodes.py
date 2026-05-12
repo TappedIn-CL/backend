@@ -7,18 +7,17 @@ from dotenv import load_dotenv
 
 from agent.state import AgentState, EventSchema
 from agent.embedding import embed_query
-from agent.pinecone_client import search_events, fetch_vectors
+from agent.pinecone_client import fetch_vectors, search_events
 from agent.scoring import score_events
-from agent.taxonomy import CATEGORIES, VIBE_TAGS, SPECIAL_TAGS
-from agent.chip_mapping import merge_chips_into_query, chips_to_categories
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+# Hydration config — used by hydrate_events node.
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 HYDRATION_TIMEOUT_SECONDS = 5.0
 MAX_HYDRATION_BATCH = 100
-
-logger = logging.getLogger(__name__)
 
 # Reuse OpenAI client pattern from embedding.py
 _chat_client: OpenAI | None = None
@@ -28,6 +27,11 @@ def _get_chat_client() -> OpenAI:
     if _chat_client is None:
         _chat_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     return _chat_client
+
+# Event metadata for prompt context
+EVENT_CATEGORIES = ["Music", "Art & Culture", "Food & Drink", "Comedy", "Nightlife", "Wellness", "Networking"]
+EVENT_TAGS = ["indoor", "outdoor", "free perks", "pop-up", "limited spots"]
+EVENT_VIBES = ["chill", "intimate", "creative", "social", "energetic", "hyped", "educational"]
 
 SYSTEM_PROMPT = """You are an event preference extractor. Given a user query about events, extract structured preferences.
 
@@ -50,16 +54,15 @@ Chip phrase mappings:
 - "foodie" → category: "Food & Drink"
 - "date night" → vibe_tags includes "intimate", keep phrase in semantic_query
 - "with friends" → vibe_tags includes "social", keep phrase in semantic_query
-- "sports" → category: "Sports", vibe_tags includes "hyped"/"energetic"
-- "adventurous" → vibe_tags includes "adventurous"
+- "solo" → vibe_tags includes "chill", keep phrase in semantic_query
 - "thrifty" / "cheap" → price_max: 20
 - "free" → price_max: 0
 
 Respond with valid JSON structure only, no additional text.
 """.format(
-    categories=", ".join(CATEGORIES),
-    tags=", ".join(SPECIAL_TAGS),
-    vibes=", ".join(VIBE_TAGS),
+    categories=", ".join(EVENT_CATEGORIES),
+    tags=", ".join(EVENT_TAGS),
+    vibes=", ".join(EVENT_VIBES),
 )
 
 USER_PROMPT_TEMPLATE = """Extract preferences from this query: "{query}"
@@ -78,16 +81,10 @@ IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
 
 def parse_intent(state: AgentState) -> AgentState:
     """
-    Node 1: Parses the user's raw query + chips into a semantic query string +
-    structured filters.
-
-    Vibes are intentionally appended to semantic_query (for embedding search)
-    and NOT placed in the Pinecone filter dict. _build_record in
-    pinecone_client.py does not store vibe_tags in metadata, so a vibes hard
-    filter would silently match zero events.
+    Node 1: Parses the user's raw query into semantic query strings + structured filters.
+    Uses LLM to extract intent from natural language.
     """
     query = state["query"]
-    chips = state.get("chips", []) or []
 
     try:
         client = _get_chat_client()
@@ -102,45 +99,25 @@ def parse_intent(state: AgentState) -> AgentState:
         )
 
         result: IntentExtraction = json.loads(response.choices[0].message.content)
-        llm_semantic_query = result.get("semantic_query", query) or query
-        llm_filters = result.get("filters", {}) or {}
 
-        # Vibes go into the embedding text, not the filter dict
-        llm_vibes = llm_filters.get("vibes", []) or []
-        vibes_phrase = " ".join(llm_vibes)
+        semantic_query = result.get("semantic_query", query)
+        query_vector = embed_query(semantic_query)
 
-        # Merge chip-derived categories with LLM-extracted categories (dedup, preserve order)
-        llm_categories = llm_filters.get("categories", []) or []
-        chip_categories = chips_to_categories(chips)
-        merged_categories = list(dict.fromkeys([*llm_categories, *chip_categories]))
+        filters = result.get("filters", {})
 
         structured_filters = {
-            "price_max": llm_filters.get("price_max"),
-            "max_distance": llm_filters.get("max_distance"),
-            "age_restrictions": llm_filters.get("age_restrictions"),
-            "categories": merged_categories,
-            "tags": llm_filters.get("tags", []) or [],
-            # NOTE: vibes deliberately omitted — Pinecone metadata has no vibe_tags,
-            # so filtering on them is a silent no-op. They're folded into the embedding instead.
+            "price_max": filters.get("price_max"),
+            "max_distance": filters.get("max_distance"),
+            "age_restrictions": filters.get("age_restrictions"),
+            "categories": filters.get("categories", []),
+            "vibes": filters.get("vibes", []),
+            "tags": filters.get("tags", [])
         }
 
-        # Build the text that actually gets embedded:
-        #   LLM's cleaned semantic_query + LLM vibes (as text) + chip semantic_phrases
-        base_text = f"{llm_semantic_query} {vibes_phrase}".strip()
-        semantic_query = merge_chips_into_query(base_text, chips)
-
-    except Exception as e:
-        logger.warning("parse_intent LLM call failed, falling back: %s", e)
-        semantic_query = merge_chips_into_query(query, chips)
-        structured_filters = {
-            "price_max": None,
-            "max_distance": None,
-            "age_restrictions": None,
-            "categories": chips_to_categories(chips),
-            "tags": [],
-        }
-
-    query_vector = embed_query(semantic_query)
+    except Exception:
+        semantic_query = query
+        query_vector = embed_query(query)
+        structured_filters = {"price_max": None, "max_distance": None, "age_restrictions": None, "categories": [], "vibes": [], "tags": []}
 
     return {
         **state,
@@ -148,87 +125,6 @@ def parse_intent(state: AgentState) -> AgentState:
         "query_vector": query_vector,
         "filters": structured_filters,
     }
-
-
-
-MOCK_EVENTS: list[EventSchema] = [
-    {
-        "id": "evt-001",
-        "title": "Sunset Jazz at The Rooftop",
-        "description": "Live jazz quartet at a converted warehouse rooftop with skyline views.",
-        "category": "Music",
-        "tags": ["outdoor", "21+"],
-        "vibe_tags": ["chill", "intimate"],
-        "venue_name": "The Rooftop DTLA",
-        "address": "820 E 3rd St, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0443,
-        "longitude": -118.2356,
-        "price_min": 15.0,
-        "price_max": 15.0,
-        "start_time": "2026-04-25T19:00:00Z",
-        "end_time": "2026-04-25T23:00:00Z",
-        "image_url": "https://example.com/jazz.jpg",
-        "source_url": "https://eventbrite.com/e/jazz-rooftop",
-    },
-    {
-        "id": "evt-002",
-        "title": "DTLA Art Walk",
-        "description": "Free monthly gallery walk featuring local LA artists across 20+ galleries.",
-        "category": "Art & Culture",
-        "tags": ["outdoor", "free", "family-friendly"],
-        "vibe_tags": ["creative", "social"],
-        "venue_name": "Arts District",
-        "address": "Arts District, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0403,
-        "longitude": -118.2348,
-        "price_min": 0.0,
-        "price_max": 0.0,
-        "start_time": "2026-04-26T18:00:00Z",
-        "end_time": "2026-04-26T22:00:00Z",
-        "image_url": "https://example.com/artwalk.jpg",
-        "source_url": "https://downtownartwalk.org",
-    },
-    {
-        "id": "evt-003",
-        "title": "Thrift Popup in Sawtelle",
-        "description": "Curated vintage popup with 30+ local sellers. Affordable finds and good coffee.",
-        "category": "Food & Drink",
-        "tags": ["indoor", "pop-up", "free"],
-        "vibe_tags": ["chill", "creative"],
-        "venue_name": "Sawtelle Studio",
-        "address": "2130 Sawtelle Blvd, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0422,
-        "longitude": -118.4472,
-        "price_min": 0.0,
-        "price_max": 0.0,
-        "start_time": "2026-04-26T11:00:00Z",
-        "end_time": "2026-04-26T17:00:00Z",
-        "image_url": "https://example.com/thrift.jpg",
-        "source_url": "https://instagram.com/sawtelle-popup",
-    },
-    {
-        "id": "evt-004",
-        "title": "Comedy Night at Westwood Brewing",
-        "description": "Stand-up open mic with UCLA comedy club. Drinks, laughs, low key vibes.",
-        "category": "Comedy",
-        "tags": ["indoor", "21+"],
-        "vibe_tags": ["social", "energetic"],
-        "venue_name": "Westwood Brewing Co.",
-        "address": "1097 Glendon Ave, Los Angeles, CA",
-        "city": "Los Angeles",
-        "latitude": 34.0635,
-        "longitude": -118.4455,
-        "price_min": 10.0,
-        "price_max": 10.0,
-        "start_time": "2026-04-25T21:00:00Z",
-        "end_time": "2026-04-25T23:30:00Z",
-        "image_url": "https://example.com/comedy.jpg",
-        "source_url": "https://eventbrite.com/e/comedy-night",
-    },
-]
 
 
 def _to_pinecone_filter(raw: dict) -> dict:
@@ -263,13 +159,27 @@ def retrieve_events(state: AgentState) -> AgentState:
     query_text = state["semantic_query"] or state["query"]
     vector = embed_query(query_text)
     pinecone_filter = _to_pinecone_filter(state["filters"] or {})
-    matches = search_events(vector, pinecone_filter, top_k=20)
+    # Over-fetch so dedup-by-(title, venue) still leaves ~20 unique candidates.
+    matches = search_events(vector, pinecone_filter, top_k=40)
 
-    candidate_events: list[EventSchema] = [
-        {
+    # Dedup by title alone — Supabase has multiple rows for the same logical
+    # event when the scraper re-runs against a new article URL (its source_id
+    # is hashed from the URL). Venue strings drift between re-extractions
+    # ("Irv's Burgers, ..." vs "La Brea, ..." vs "Multiple Locations: ..."),
+    # so title is the most stable dedup key. Keep the highest-ranked match.
+    candidate_events: list[EventSchema] = []
+    seen: set[str] = set()
+    for m in matches:
+        title = m["metadata"].get("title", "")
+        venue = m["metadata"].get("venue_name", "")
+        dedupe_key = title.strip().lower()
+        if not dedupe_key or dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        candidate_events.append({
             "id": m["id"],
-            "title": m["metadata"].get("title", ""),
-            "venue_name": m["metadata"].get("venue_name", ""),
+            "title": title,
+            "venue_name": venue,
             "city": m["metadata"].get("city", ""),
             "category": m["metadata"].get("category", ""),
             "tags": m["metadata"].get("tags", []),
@@ -284,9 +194,9 @@ def retrieve_events(state: AgentState) -> AgentState:
             "end_time": None,
             "image_url": None,
             "source_url": "",
-        }
-        for m in matches
-    ]
+        })
+        if len(candidate_events) >= 20:
+            break
 
     return {
         **state,
@@ -308,7 +218,7 @@ def hydrate_events(state: AgentState) -> AgentState:
     arrive here as empty from retrieve_events.
 
     This node calls GET /events/by-ids?ids=<comma-separated UUIDs> to get
-    full HydratedEventResponse objects from Supabase, and merges them onto 
+    full HydratedEventResponse objects from Supabase, and merges them onto
     each candidate.
 
     Pinecone's similarity-ranked order from retrieve_events is preserved
@@ -377,8 +287,14 @@ def hydrate_events(state: AgentState) -> AgentState:
 
 def score_and_rank(state: AgentState) -> AgentState:
     """
-    Node 4: Scores and ranks candidate events using cosine similarity blend.
-    Uses taste_vector from state if available (set by compute_taste node).
+    Node 4: Scores and ranks candidate events using a cosine similarity blend.
+
+    Final score = 0.7 * cosine(query_vector, event_vector)
+                + 0.3 * cosine(taste_vector, event_vector)
+
+    Falls back to query-only when taste_vector is None (cold-start /
+    unauthenticated user). Reads from hydrated_events when available so the
+    ranked output carries full Supabase fields (description, vibe_tags, etc).
     """
     candidates = state.get("hydrated_events") or state["candidate_events"]
     if not candidates:
