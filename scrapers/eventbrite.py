@@ -58,9 +58,9 @@ def classify_categories_with_openai(events):
 You are classifying Eventbrite events into categories.
 
 For each event below, return the single best-fit category from this exact list:
-Music, Nightlife, Sports, Food & Drink, Art & Culture, Comedy, Wellness, Networking
+Music, Food & Drink, Arts, Nightlife, Comedy, Wellness, Networking, Sports, Family, Fashion, Other
 
-Pick the closest match even if no category is a perfect fit — every event must be assigned one of these eight.
+Use Other only when none of the specific categories fit. Every event must be assigned one of these categories.
 
 Events:
 {json.dumps(payload, indent=2)}

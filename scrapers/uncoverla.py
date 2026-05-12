@@ -58,7 +58,7 @@ Extract each individual event dated on or after the current date and return a JS
 - "location": venue name and/or address (string or null)
 - "cost": numeric cost in dollars, 0 if free, null if not mentioned
 - "description": 1-2 sentence description (string)
-- "category": the single best-fit category from this exact list: Music, Nightlife, Sports, Food & Drink, Art & Culture, Comedy, Wellness, Networking. Pick the closest match even if no category is a perfect fit — every event must be assigned one of these eight.
+- "category": the single best-fit category from this exact list: Music, Food & Drink, Arts, Nightlife, Comedy, Wellness, Networking, Sports, Family, Fashion, Other. Use Other only when none of the specific categories fit. Every event must be assigned one of these categories.
 
 Return only valid JSON, no explanation. Example:
 [{{"title": "...", "date": "{today}", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
