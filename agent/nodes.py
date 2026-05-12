@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -12,6 +13,10 @@ from agent.taxonomy import CATEGORIES, VIBE_TAGS, SPECIAL_TAGS
 from agent.chip_mapping import merge_chips_into_query, chips_to_categories
 
 load_dotenv()
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+HYDRATION_TIMEOUT_SECONDS = 5.0
+MAX_HYDRATION_BATCH = 100
 
 logger = logging.getLogger(__name__)
 
@@ -290,12 +295,92 @@ def retrieve_events(state: AgentState) -> AgentState:
     }
 
 
+def hydrate_events(state: AgentState) -> AgentState:
+    """
+    Node 3: Fetches full Supabase event rows for the Pinecone candidates and
+    merges them into hydrated_events, bridging the gap between sparse vector
+    metadata and the rich fields the frontend needs.
+
+    Pinecone stores only the fields needed for filtering and scoring:
+    title, venue_name, city, category, tags, price_min/max, latitude,
+    longitude, and start_time_unix. Fields like description, vibe_tags,
+    address, image_url, source_url, and end_time are not in Pinecone and
+    arrive here as empty from retrieve_events.
+
+    This node calls GET /events/by-ids?ids=<comma-separated UUIDs> to get
+    full HydratedEventResponse objects from Supabase, and merges them onto 
+    each candidate.
+
+    Pinecone's similarity-ranked order from retrieve_events is preserved
+    through the merge loop so score_and_rank receives events in their
+    original relevance order.
+    """
+    # --- Guard: nothing to hydrate ---
+    candidates = state.get("candidate_events") or []
+    if not candidates:
+        return {**state, "hydrated_events": []}
+
+    # --- Build ID list, warn if truncation occurs ---
+    if len(candidates) > MAX_HYDRATION_BATCH:
+        logger.warning(
+            "hydrate_events: %d candidates exceed batch cap %d; truncating",
+            len(candidates), MAX_HYDRATION_BATCH,
+        )
+    ids = [e["id"] for e in candidates][:MAX_HYDRATION_BATCH]
+
+    try:
+        # --- Fetch full rows from Supabase via the backend endpoint ---
+        resp = httpx.get(
+            f"{BACKEND_URL}/events/by-ids",
+            params={"ids": ",".join(ids)},
+            timeout=HYDRATION_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        full_rows = resp.json()
+
+        # --- Index full rows by id for O(1) lookup during merge ---
+        rows_by_id = {row["id"]: row for row in full_rows}
+
+        # --- Merge: walk candidates in Pinecone order, overlay Supabase fields ---
+        hydrated: list[EventSchema] = []
+        miss_count = 0
+        for candidate in candidates:
+            full = rows_by_id.get(candidate["id"])
+            if full is None:
+                # Event exists in Pinecone but was deleted from Supabase;
+                # keep sparse data so the slot isn't silently dropped.
+                miss_count += 1
+                hydrated.append(candidate)
+            else:
+                # Supabase overwrites candidate fields as source of truth.
+                # Exception: lat/lng come only from Pinecone metadata for the
+                # demo (event_to_hydrated returns None for both); prefer
+                # candidate values when the full row has None.
+                merged = {**candidate, **full}
+                merged["latitude"] = full.get("latitude") or candidate.get("latitude", 0.0)
+                merged["longitude"] = full.get("longitude") or candidate.get("longitude", 0.0)
+                hydrated.append(merged)
+
+        if miss_count:
+            logger.warning(
+                "hydrate_events: %d/%d events found in Pinecone but missing from Supabase",
+                miss_count, len(ids),
+            )
+
+    except Exception as e:
+        # --- Fallback: pass sparse candidates through so the pipeline survives ---
+        logger.error("Hydration failed, returning sparse candidates: %s", e)
+        hydrated = list(candidates)
+
+    return {**state, "hydrated_events": hydrated}
+
+
 def score_and_rank(state: AgentState) -> AgentState:
     """
-    Node 3: Scores and ranks candidate events using cosine similarity blend.
+    Node 4: Scores and ranks candidate events using cosine similarity blend.
     Uses taste_vector from state if available (set by compute_taste node).
     """
-    candidates = state["candidate_events"]
+    candidates = state.get("hydrated_events") or state["candidate_events"]
     if not candidates:
         return {
             **state,
