@@ -3,13 +3,14 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import json
+from datetime import date
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
 from openai import OpenAI
 
 from db.session import SessionLocal
 from app.models.event import Event
+from scrapers.date_utils import is_current_or_future_event, parse_event_datetime
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -40,15 +41,17 @@ def get_article_text(url):
 
 
 def extract_events_with_openai(article_url, article_text):
+    today = date.today().isoformat()
     prompt = f"""
 You are extracting structured event data from an LA events article.
 
 Article URL: {article_url}
+Current date: {today}
 
 Article text:
 {article_text[:6000]}
 
-Extract each individual event mentioned and return a JSON array. Each event object should have:
+Extract each individual event dated on or after the current date and return a JSON array. Skip past events. Each event object should have:
 - "title": event name (string)
 - "date": start date in ISO format YYYY-MM-DD (string, required — skip event if unknown)
 - "time": time as a string like "7:00 PM" or null if not mentioned
@@ -58,7 +61,7 @@ Extract each individual event mentioned and return a JSON array. Each event obje
 - "category": the single best-fit category from this exact list: Music, Nightlife, Sports, Food & Drink, Art & Culture, Comedy, Wellness, Networking. Pick the closest match even if no category is a perfect fit — every event must be assigned one of these eight.
 
 Return only valid JSON, no explanation. Example:
-[{{"title": "...", "date": "2026-04-25", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
+[{{"title": "...", "date": "{today}", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
 """
 
     response = client.chat.completions.create(
@@ -92,15 +95,13 @@ def save_events_to_db(events):
                 continue
 
             try:
-                date = datetime.fromisoformat(e["date"])
-                if e.get("time"):
-                    try:
-                        time = datetime.strptime(e["time"], "%I:%M %p")
-                        date = date.replace(hour=time.hour, minute=time.minute)
-                    except ValueError:
-                        pass
+                date = parse_event_datetime(e["date"], e.get("time"))
             except ValueError as ex:
                 print(f"    ✗ bad date '{e.get('date')}' for '{e.get('title')}': {ex}")
+                continue
+
+            if not is_current_or_future_event(date):
+                print(f"    ✗ skipped past event: {e['title']} ({e['date']})")
                 continue
 
             event = Event(

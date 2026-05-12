@@ -5,11 +5,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import json
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
 from openai import OpenAI
 
 from db.session import SessionLocal
 from app.models.event import Event
+from scrapers.date_utils import is_current_or_future_event, parse_event_datetime
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -98,9 +98,13 @@ def save_events_to_db(events):
                 continue
 
             try:
-                date = datetime.fromisoformat(e["date"])
+                date = parse_event_datetime(e["date"])
             except ValueError as ex:
                 print(f"    ✗ bad date '{e['date']}' for '{e['title']}': {ex}")
+                continue
+
+            if not is_current_or_future_event(date):
+                print(f"    ✗ skipped past event: {e['title']} ({e['date']})")
                 continue
 
             event = Event(
