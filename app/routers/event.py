@@ -42,6 +42,10 @@ def get_event(event_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]) -> E
 
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) -> EventResponse:
+    # Convert lists to comma-separated strings for storage
+    special_tags_str = ",".join(payload.special_tags) if payload.special_tags else None
+    vibe_tags_str = ",".join(payload.vibe_tags) if payload.vibe_tags else None
+    
     event = Event(
         id=uuid.uuid4(),
         title=payload.title,
@@ -50,6 +54,8 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         cost=payload.cost,
         location=payload.location,
         category=payload.category,
+        special_tags=special_tags_str,
+        vibe_tags=vibe_tags_str,
     )
     db.add(event)
     db.commit()
