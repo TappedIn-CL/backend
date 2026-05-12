@@ -3,10 +3,10 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import json
+from datetime import date
 import requests
 import hashlib
 from bs4 import BeautifulSoup
-from datetime import datetime
 from openai import OpenAI
 
 from db.session import SessionLocal
@@ -42,25 +42,27 @@ def get_article_text(url):
 
 
 def extract_events_with_openai(article_url, article_text):
+    today = date.today().isoformat()
     prompt = f"""
 You are extracting structured event data from an LA events article.
 
 Article URL: {article_url}
+Current date: {today}
 
 Article text:
 {article_text[:6000]}
 
-Extract each individual event mentioned and return a JSON array. Each event object should have:
+Extract each individual event dated on or after the current date and return a JSON array. Skip past events. Each event object should have:
 - "title": event name (string)
 - "date": start date in ISO format YYYY-MM-DD (string, required — skip event if unknown)
 - "time": time as a string like "7:00 PM" or null if not mentioned
 - "location": venue name and/or address (string or null)
 - "cost": numeric cost in dollars, 0 if free, null if not mentioned
 - "description": 1-2 sentence description (string)
-- "category": one of: Music, Food & Drink, Arts, Sports, Family, Fashion, Wellness, Nightlife, Other
+- "category": the single best-fit category from this exact list: Music, Food & Drink, Arts, Nightlife, Comedy, Wellness, Networking, Sports, Family, Fashion, Other. Use Other only when none of the specific categories fit. Every event must be assigned one of these categories.
 
 Return only valid JSON, no explanation. Example:
-[{{"title": "...", "date": "2026-04-25", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
+[{{"title": "...", "date": "{today}", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
 """
 
     response = client.chat.completions.create(
