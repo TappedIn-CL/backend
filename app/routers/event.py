@@ -43,10 +43,16 @@ def get_events_by_ids(
     id_list = [i.strip() for i in ids.split(",") if i.strip()]
     if not id_list:
         return []
-    try:
-        parsed_ids = [uuid.UUID(i) for i in id_list]
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID in ids param")
+    # Silently skip non-UUID values (e.g. legacy mock IDs left over in Pinecone)
+    # so a single bad value can't 422 an entire batch hydration request.
+    parsed_ids = []
+    for i in id_list:
+        try:
+            parsed_ids.append(uuid.UUID(i))
+        except ValueError:
+            continue
+    if not parsed_ids:
+        return []
 
     events = db.query(Event).filter(Event.id.in_(parsed_ids)).all()
     # Preserve request order so the agent's hydrate node can zip results back
