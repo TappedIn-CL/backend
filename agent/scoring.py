@@ -1,5 +1,6 @@
 from agent.embedding import embed_text
 from agent.state import AgentState, EventSchema
+import asyncio
 
 QUERY_WEIGHT = 0.7
 TASTE_WEIGHT = 0.3
@@ -55,10 +56,10 @@ def score_events(
     return [event for _, event in scored]
 
 
-def compute_taste(state: AgentState) -> AgentState:
+async def compute_taste(state: AgentState) -> AgentState:
     """Node: compute taste_vector from user_profile and write it to state. Sets taste_vector=None on cold-start."""
     user_profile = state.get("user_profile") or {}
     interests = user_profile.get("interests") or []
     favorited_tags = user_profile.get("favorited_tags") or []
-    taste_vector = compute_taste_vector(interests, favorited_tags)
+    taste_vector = await asyncio.to_thread(compute_taste_vector, interests, favorited_tags)
     return {**state, "taste_vector": taste_vector}
