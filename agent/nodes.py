@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -20,12 +21,12 @@ HYDRATION_TIMEOUT_SECONDS = 5.0
 MAX_HYDRATION_BATCH = 100
 
 # Reuse OpenAI client pattern from embedding.py
-_chat_client: OpenAI | None = None
+_chat_client: AsyncOpenAI | None = None
 
-def _get_chat_client() -> OpenAI:
+def _get_chat_client() -> AsyncOpenAI:
     global _chat_client
     if _chat_client is None:
-        _chat_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        _chat_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     return _chat_client
 
 # Event metadata for prompt context
@@ -79,7 +80,7 @@ Query: "chill outdoor jazz under $20 this weekend within 10 miles"
 IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
 
 
-def parse_intent(state: AgentState) -> AgentState:
+async def parse_intent(state: AgentState) -> AgentState:
     """
     Node 1: Parses the user's raw query into semantic query strings + structured filters.
     Uses LLM to extract intent from natural language.
@@ -88,7 +89,7 @@ def parse_intent(state: AgentState) -> AgentState:
 
     try:
         client = _get_chat_client()
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -114,6 +115,7 @@ def parse_intent(state: AgentState) -> AgentState:
             "tags": filters.get("tags", [])
         }
 
+    query_vector = await asyncio.to_thread(embed_query, semantic_query)
     except Exception:
         semantic_query = query
         query_vector = embed_query(query)
@@ -150,15 +152,21 @@ def _to_pinecone_filter(raw: dict) -> dict:
     return f
 
 
-def retrieve_events(state: AgentState) -> AgentState:
+async def retrieve_events(state: AgentState) -> AgentState:
     """
-    Node 2: Embeds the semantic query and retrieves candidate events from Pinecone.
-    candidate_events are populated from Pinecone metadata. Full Supabase hydration
-    (description, address, image_url) is added by Allen's hydration step.
+    Node 2: Retrieves candidate events from Pinecone using the vector
+    already computed by parse_intent.
     """
-    query_text = state["semantic_query"] or state["query"]
-    vector = embed_query(query_text)
+    vector = state["query_vector"]
+    if not vector:
+        query_text = state["semantic_query"] or state["query"]
+        vector = await asyncio.to_thread(embed_query, query_text)
+
     pinecone_filter = _to_pinecone_filter(state["filters"] or {})
+    matches = await asyncio.to_thread(search_events, vector, pinecone_filter, top_k=20)
+
+    candidate_events: list[EventSchema] = [
+        {
     # Over-fetch so dedup-by-(title, venue) still leaves ~20 unique candidates.
     matches = search_events(vector, pinecone_filter, top_k=40)
 
@@ -205,6 +213,12 @@ def retrieve_events(state: AgentState) -> AgentState:
     }
 
 
+async def hydrate_events(state: AgentState) -> AgentState:
+    """
+    Node 3: Fetch full event rows directly from the database.
+    This populates description, address, image_url, and vibe_tags which are
+    not stored in Pinecone metadata.
+    """
 def hydrate_events(state: AgentState) -> AgentState:
     """
     Node 3: Fetches full Supabase event rows for the Pinecone candidates and
@@ -230,6 +244,56 @@ def hydrate_events(state: AgentState) -> AgentState:
     if not candidates:
         return {**state, "hydrated_events": []}
 
+    ids = [e["id"] for e in candidates][:MAX_HYDRATION_BATCH]
+
+    try:
+        from db.session import SessionLocal
+        from app.models.event import Event
+        from app.utils.event_utils import event_to_hydrated
+        import uuid as uuid_mod
+
+        def _fetch_from_db():
+            db = SessionLocal()
+            try:
+                parsed_ids = [uuid_mod.UUID(i) for i in ids]
+                events = db.query(Event).filter(Event.id.in_(parsed_ids)).all()
+                by_id = {str(e.id): e for e in events}
+                return {
+                    eid: {
+                        "id": str(e.id),
+                        "title": e.title,
+                        "description": e.description or "",
+                        "category": e.category or "",
+                        "tags": [t.strip() for t in (e.special_tags or "").split(",") if t.strip()],
+                        "vibe_tags": [t.strip() for t in (e.vibe_tags or "").split(",") if t.strip()],
+                        "venue_name": e.location or "",
+                        "address": e.location or "",
+                        "city": "Los Angeles",
+                        "latitude": 0.0,
+                        "longitude": 0.0,
+                        "price_min": e.cost or 0.0,
+                        "price_max": e.cost or 0.0,
+                        "start_time": e.date.isoformat() if e.date else "",
+                        "end_time": None,
+                        "image_url": None,
+                        "source_url": "",
+                    }
+                    for eid, e in by_id.items()
+                }
+            finally:
+                db.close()
+
+        rows_by_id = await asyncio.to_thread(_fetch_from_db)
+
+        hydrated: list[EventSchema] = []
+        for candidate in candidates:
+            full = rows_by_id.get(candidate["id"])
+            if full is None:
+                hydrated.append(candidate)
+            else:
+                hydrated.append({**candidate, **full})
+
+    except Exception as e:
     # --- Build ID list, warn if truncation occurs ---
     if len(candidates) > MAX_HYDRATION_BATCH:
         logger.warning(
@@ -285,6 +349,12 @@ def hydrate_events(state: AgentState) -> AgentState:
     return {**state, "hydrated_events": hydrated}
 
 
+async def score_and_rank(state: AgentState) -> AgentState:
+    """
+    Node 4: Scores and ranks candidate events using cosine similarity blend.
+    Uses taste_vector from state if available (set by compute_taste node).
+    """
+    candidates = state.get("hydrated_events") or state.get("candidate_events") or []
 def score_and_rank(state: AgentState) -> AgentState:
     """
     Node 4: Scores and ranks candidate events using a cosine similarity blend.
@@ -307,10 +377,11 @@ def score_and_rank(state: AgentState) -> AgentState:
     query_vector = state["query_vector"] or [0.0] * 1536
     if not state["query_vector"]:
         logger.warning("score_and_rank called with no query_vector; scoring will be arbitrary")
+    
     taste_vector = state.get("taste_vector")
     event_ids = [e["id"] for e in candidates]
     try:
-        event_vectors = fetch_vectors(event_ids)
+        event_vectors = await asyncio.to_thread(fetch_vectors, event_ids)
         ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
     except Exception as e:
         logger.error("Scoring failed, returning unranked candidates: %s", e)

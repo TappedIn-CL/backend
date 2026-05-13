@@ -1,8 +1,6 @@
 import math
 from unittest.mock import patch
-
 import pytest
-
 from agent.scoring import (
     cosine_similarity,
     compute_taste_vector,
@@ -157,26 +155,30 @@ _BASE_STATE: AgentState = {
 }
 
 
-def test_compute_taste_node_no_user_profile_sets_none():
-    result = compute_taste({**_BASE_STATE, "user_profile": None})
+@pytest.mark.anyio
+async def test_compute_taste_node_no_user_profile_sets_none():
+    result = await compute_taste({**_BASE_STATE, "user_profile": None})
     assert result["taste_vector"] is None
 
 
-def test_compute_taste_node_empty_profile_sets_none():
-    result = compute_taste(
+@pytest.mark.anyio
+async def test_compute_taste_node_empty_profile_sets_none():
+    result = await compute_taste(
         {**_BASE_STATE, "user_profile": {"interests": [], "favorited_tags": []}}
     )
     assert result["taste_vector"] is None
 
 
-def test_compute_taste_node_missing_keys_sets_none():
-    result = compute_taste({**_BASE_STATE, "user_profile": {}})
+@pytest.mark.anyio
+async def test_compute_taste_node_missing_keys_sets_none():
+    result = await compute_taste({**_BASE_STATE, "user_profile": {}})
     assert result["taste_vector"] is None
 
 
-def test_compute_taste_node_valid_profile_sets_taste_vector():
+@pytest.mark.anyio
+async def test_compute_taste_node_valid_profile_sets_taste_vector():
     with patch("agent.scoring.embed_text", return_value=[0.9] * 1536):
-        result = compute_taste(
+        result = await compute_taste(
             {
                 **_BASE_STATE,
                 "user_profile": {
@@ -188,8 +190,9 @@ def test_compute_taste_node_valid_profile_sets_taste_vector():
     assert result["taste_vector"] == [0.9] * 1536
 
 
-def test_compute_taste_node_preserves_rest_of_state():
-    result = compute_taste({**_BASE_STATE, "user_profile": None})
+@pytest.mark.anyio
+async def test_compute_taste_node_preserves_rest_of_state():
+    result = await compute_taste({**_BASE_STATE, "user_profile": None})
     assert result["query"] == "test query"
     assert result["query_vector"] == [0.1] * 1536
 
@@ -203,29 +206,13 @@ def test_blend_weight_constants_are_correct():
 
 
 def test_score_events_weights_are_0_7_query_0_3_taste():
-    # Use event vectors where only the EXACT 0.7/0.3 split produces this ordering.
-    # evt-a: query_score=0.8, taste_score=0.2  → 0.7*0.8 + 0.3*0.2 = 0.56+0.06 = 0.62
-    # evt-b: query_score=0.2, taste_score=0.8  → 0.7*0.2 + 0.3*0.8 = 0.14+0.24 = 0.38
-    # evt-a wins with 0.7/0.3. With 0.3/0.7: evt-a=0.38, evt-b=0.62 → evt-b would win.
-    # Vectors: [0.8, 0.2, 0] and [0.2, 0.8, 0] against query=[1,0,0], taste=[0,1,0].
-    # cosine([1,0,0], [0.8,0.2,0]) = 0.8/sqrt(0.68) ≈ 0.970; but we need exact 0.8/0.2.
-    # Easier: use pure unit vectors with orthogonal query/taste axes.
-    # cosine([1,0,0], [1,0,0])=1.0, cosine([0,1,0], [1,0,0])=0.0 → scores are 0.7 and 0.0.
-    # To get scores exactly 0.8 and 0.2, we need specific non-orthogonal vectors.
-    # Simplest: directly assert QUERY_WEIGHT and TASTE_WEIGHT constants are 0.7 and 0.3,
-    # which Fix 6a (test_blend_weight_constants_are_correct) already does.
-    # This test adds a second layer: proves the constants are USED in score_events.
     vectors = {
         "evt-a": [1.0, 0.0, 0.0],   # perfectly aligned with query
         "evt-b": [0.0, 1.0, 0.0],   # perfectly aligned with taste
     }
     evt_a = _make_event("evt-a", "A")
     evt_b = _make_event("evt-b", "B")
-    # evt-a: QUERY_WEIGHT*1.0 + TASTE_WEIGHT*0.0 = 0.7
-    # evt-b: QUERY_WEIGHT*0.0 + TASTE_WEIGHT*1.0 = 0.3
-    # If weights were flipped (0.3/0.7), evt-b would win.
     ranked = score_events([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [evt_a, evt_b], vectors)
     assert ranked[0]["id"] == "evt-a"
-    # Verify the constants actually drive the result — swap vectors to simulate flipped weights
     ranked_flipped = score_events([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [evt_a, evt_b], vectors)
     assert ranked_flipped[0]["id"] == "evt-b"
