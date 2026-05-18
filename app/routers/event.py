@@ -81,6 +81,8 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         date=payload.date,
         cost=payload.cost,
         location=payload.location,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
         category=payload.category,
         special_tags=special_tags_str,
         vibe_tags=vibe_tags_str,
