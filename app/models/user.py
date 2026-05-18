@@ -32,5 +32,5 @@ class User(Base):
     occupation = Column(String, nullable=True)
     interests = Column(ARRAY(String), nullable=True)
 
-    # saved events
-    saved_events = Column(ARRAY(String), nullable=True)
+    # favorite events
+    favorite_events = Column(ARRAY(String), nullable=True)

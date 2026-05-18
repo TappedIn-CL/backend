@@ -28,8 +28,8 @@ class UserCreate(BaseModel):
     occupation: str | None = None
     interests: list[str] | None = None
 
-    # saved events
-    saved_events: list[str] | None = None
+    # favorite events
+    favorite_events: list[str] | None = None
 
 class UserResponse(BaseModel):
     id: UUID
@@ -58,8 +58,8 @@ class UserResponse(BaseModel):
     occupation: str | None = None
     interests: list[str] | None = None
 
-    # saved events
-    saved_events: list[str] | None = None
+    # favorite events
+    favorite_events: list[str] | None = None
 
     class Config:
         from_attributes = True

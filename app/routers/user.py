@@ -44,8 +44,8 @@ def read_me(
             "occupation": user.occupation,
             "interests": user.interests,
 
-            # saved events
-            "saved_events": user.saved_events,
+            # favorite events
+            "favorite_events": user.favorite_events,
         }
     
     return {"message": "user not found in database, but JWT is valid."}
