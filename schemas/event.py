@@ -44,6 +44,8 @@ class EventCreate(BaseModel):
     title: str
     date: datetime
     cost: float = Field(ge=0)
+    latitude: float | None = None
+    longitude: float | None = None
 
     description: str | None = None
     location: str | None = None
@@ -60,6 +62,8 @@ class EventResponse(BaseModel):
     title: str
     date: datetime
     cost: float
+    latitude: float | None = None
+    longitude: float | None = None
 
     description: str | None = None
     location: str | None = None
