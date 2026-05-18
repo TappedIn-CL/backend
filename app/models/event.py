@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, String, UniqueConstraint, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import validates
 from datetime import datetime
@@ -33,6 +33,7 @@ class Event(Base):
     vibe_tags = Column(String, nullable=True)
     source = Column(String, nullable=True)
     source_id = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (

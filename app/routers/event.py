@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,15 +12,14 @@ from schemas.event import EventCreate, EventResponse, HydratedEventResponse
 
 router = APIRouter()
 
-_mock_events: dict[uuid.UUID, EventResponse] = {}
-
 
 @router.get("", response_model=list[EventResponse])
 def list_events(
     q: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db),
 ) -> list[EventResponse]:
-    events = db.query(Event).order_by(Event.created_at.desc()).all()
+    today_start = datetime.combine(date.today(), time.min)
+    events = db.query(Event).filter(Event.date >= today_start).order_by(Event.date.asc()).all()
 
     if q and q.strip():
         query = q.strip().casefold()
