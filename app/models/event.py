@@ -5,43 +5,18 @@ from datetime import datetime
 import uuid
 
 
+from agent.taxonomy import CATEGORIES, SPECIAL_TAGS, VIBE_TAGS as TAXONOMY_VIBE_TAGS
 from db.session import Base
 
 
-ALLOWED_EVENT_CATEGORIES = {
-    "Music",
-    "Food & Drink",
-    "Arts",
-    "Nightlife",
-    "Comedy",
-    "Wellness",
-    "Networking",
-    "Sports",
-    "Family",
-    "Comedy",
-    "Fashion",
-    "Other",
-}
-
-ALLOWED_SPECIAL_TAGS = {
-    "Outdoor",
-    "Indoor",
-    "21+",
-    "Family-friendly",
-    "Limited spots",
-    "Pop-up",
-    "Free perks",
-}
-
-VIBE_TAGS = {
-    "Chill",
-    "Energetic",
-    "Intimate",
-    "Social",
-    "Creative",
-    "Hyped",
-    "Educational",
-}
+# Source of truth for category/tag/vibe vocabulary lives in agent/taxonomy.py.
+# Importing the sets here keeps the DB validator, the LLM enrichment prompt,
+# and the Pinecone filter contract aligned on a single list. Lowercase is the
+# canonical convention (see taxonomy.py); legacy capitalized values in this
+# file were the source of the drift fixed in this change.
+ALLOWED_EVENT_CATEGORIES = set(CATEGORIES)
+ALLOWED_SPECIAL_TAGS = set(SPECIAL_TAGS)
+VIBE_TAGS = set(TAXONOMY_VIBE_TAGS)
 
 
 class Event(Base):
@@ -87,7 +62,7 @@ class Event(Base):
                 + ", ".join(sorted(ALLOWED_SPECIAL_TAGS))
             )
         return value
-    
+
     @validates("vibe_tags")
     def validate_vibe_tags(self, key: str, value: str | None) -> str | None:
         if value is None:

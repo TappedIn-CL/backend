@@ -1,88 +1,83 @@
-import asyncio
 import json
 import time
+import logging
+from typing import Annotated
 
-from fastapi import APIRouter
-from sse_starlette.sse import EventSourceResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
+from agent.graph import agent
+from auth.deps import get_optional_jwt_payload
+from db.dependencies import get_db
+from app.models.user import User
 from schemas.agent import AgentQueryRequest
 
-
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def get_user_profile(
+    payload: Annotated[dict | None, Depends(get_optional_jwt_payload)],
+    db: Session = Depends(get_db),
+) -> dict | None:
+    if not payload:
+        return None
+
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return None
+
+    return {
+        "interests": user.interests or [],
+        "favorited_tags": [],
+    }
+
 
 @router.post("/query")
-async def query_agent(body: AgentQueryRequest):
-
-    # TODO: replace asyncio.sleep with actual logic
+async def agent_query(
+    payload: AgentQueryRequest,
+    user_profile: Annotated[dict | None, Depends(get_user_profile)],
+):
     async def event_generator():
-        # -----------------------------------
-        # Phase 1: parsing
-        # -----------------------------------
-
         start_time = time.time()
-        print(f"start time: {start_time}")
 
-        yield {
-            "event": "phase",
-            "data": json.dumps({
-                "phase": "parsing"
-            })
-        }
+        yield "event: phase\ndata: {\"phase\": \"parsing\"}\n\n"
 
-        # TODO: Implement parsing step
-        print(f"query: {body.query}")
-        print(f"chips: {body.chips}")
-        await asyncio.sleep(5)
+        try:
+            async for event in agent.astream({
+                "query": payload.query,
+                "chips": payload.chips,
+                "user_profile": user_profile,
+                "semantic_query": "",
+                "filters": {},
+                "query_vector": None,
+                "candidate_events": [],
+                "hydrated_events": [],
+                "ranked_events": [],
+                "response": None,
+                "taste_vector": None,
+            }):
+                if "parse_intent" in event:
+                    yield "event: phase\ndata: {\"phase\": \"retrieving\"}\n\n"
+                elif "retrieve_events" in event:
+                    yield "event: phase\ndata: {\"phase\": \"hydrating\"}\n\n"
+                elif "hydrate_events" in event:
+                    yield "event: phase\ndata: {\"phase\": \"scoring\"}\n\n"
+                elif "score_and_rank" in event:
+                    state = event["score_and_rank"]
+                    latency = int((time.time() - start_time) * 1000)
+                    results = {
+                        "events": state.get("ranked_events", []),
+                        "count": len(state.get("ranked_events", [])),
+                        "latency_ms": latency,
+                    }
+                    yield f"event: results\ndata: {json.dumps(results)}\n\n"
+                    yield "event: done\ndata: {}\n\n"
 
-        # -----------------------------------
-        # Phase 2: retrieving
-        # -----------------------------------
-        yield {
-            "event": "phase",
-            "data": json.dumps({
-                "phase": "retrieving"
-            })
-        }
+        except Exception as e:
+            logger.error("Agent query failed: %s", e)
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
-        #TODO: Implement retrieving step
-        await asyncio.sleep(5)
-
-        # -----------------------------------
-        # Phase 3: hydrating
-        # -----------------------------------
-        yield {
-            "event": "phase",
-            "data": json.dumps({
-                "phase": "hydrating"
-            })
-        }
-
-        #TODO: Implement hydrating step
-        await asyncio.sleep(5)
-
-        # -----------------------------------
-        # Phase 4: scoring
-        # -----------------------------------
-        yield {
-            "event": "phase",
-            "data": json.dumps({
-                "phase": "scoring"
-            })
-        }
-
-        #TODO: Implement scoring step
-        await asyncio.sleep(5)
-
-        # -----------------------------------
-        # Final Results
-        # -----------------------------------
-        yield {
-            "event": "results",
-            "data": json.dumps({
-                "events": [{}], # TODO: replace with actual events
-                "count": 10, # TODO: replace with actual count
-                "latency_ms": (time.time() - start_time) * 1000 # TODO: replace with actual latency
-            })
-        }
-
-    return EventSourceResponse(event_generator())
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

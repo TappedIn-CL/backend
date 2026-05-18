@@ -24,7 +24,7 @@ jobs:
             pip install -r requirements.txt
           fi
 
-      - name: Run scrapers
+      - name: Run ingestion pipeline (scrape → enrich → embed)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -32,9 +32,4 @@ jobs:
           PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           PYTHONUNBUFFERED: "1"
-        run: |
-          for script in scrapers/*.py; do
-            [ "$(basename "$script")" = "__init__.py" ] && continue
-            echo "Running $script"
-            python "$script"
-          done
+        run: python scrapers/run_pipeline.py

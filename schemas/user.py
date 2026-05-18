@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr
 from uuid import UUID
 from datetime import date
 
+
 class UserCreate(BaseModel):
     # account tab
     email: EmailStr
@@ -45,7 +46,7 @@ class UserResponse(BaseModel):
     email_notifs: bool
     push_notifs: bool
     sms_notifs: bool
-    
+
     # demographics tab
     date_of_birth: date | None = None
     pronouns: str | None = None
