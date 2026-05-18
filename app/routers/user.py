@@ -49,3 +49,59 @@ def read_me(
         }
     
     return {"message": "user not found in database, but JWT is valid."}
+
+@router.get("/me/favorites")
+def read_favorite_events(
+    payload: Annotated[dict, Depends(get_jwt_payload)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    id = payload.get("sub")
+    user = db.query(User).filter(User.id == id).first()
+
+    if user:
+        return {
+            "favorite_events": user.favorite_events or [],
+        }
+    
+    return {"message": "user not found in database, but JWT is valid."}
+
+@router.post("/me/favorites")
+def add_favorite_event(
+    event_id: str,
+    payload: Annotated[dict, Depends(get_jwt_payload)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    id = payload.get("sub")
+    user = db.query(User).filter(User.id == id).first()
+
+    if user:
+        favorite_events = user.favorite_events or []
+        
+        if event_id not in favorite_events:
+            user.favorite_events = favorite_events + [event_id] # avoid mutating the list in-place if it's already set since SQLAlchemy can be picky about this
+            db.commit()
+            return {"message": "Event added to favorites."}
+        else:
+            return {"message": "Event already in favorites."}
+
+    return {"message": "user not found in database, but JWT is valid."}
+
+@router.delete("/me/favorites/{event_id}")
+def remove_favorite_event(
+    event_id: str,
+    payload: Annotated[dict, Depends(get_jwt_payload)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    id = payload.get("sub")
+    user = db.query(User).filter(User.id == id).first()
+
+    if user:
+        favorite_events = user.favorite_events or []
+        if event_id in favorite_events:
+            user.favorite_events = [e for e in favorite_events if e != event_id]
+            db.commit()
+            return {"message": "Event removed from favorites."}
+        else:
+            return {"message": "Event not found in favorites."}
+
+    return {"message": "user not found in database, but JWT is valid."}
