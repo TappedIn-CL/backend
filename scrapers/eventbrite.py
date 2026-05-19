@@ -10,6 +10,7 @@ from openai import OpenAI
 from db.session import SessionLocal
 from app.models.event import Event
 from scrapers.date_utils import is_current_or_future_event, parse_event_datetime
+from app.utils.geocoding import geocode_address
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -107,12 +108,19 @@ def save_events_to_db(events):
                 print(f"    ✗ skipped past event: {e['title']} ({e['date']})")
                 continue
 
+            # Geocode location (if present) once per event
+            lat = lng = None
+            if e.get("location"):
+                lat, lng = geocode_address(e.get("location"))
+
             event = Event(
                 title=e["title"],
                 description=e.get("description"),
                 date=date,
                 cost=0.0,
                 location=e.get("location"),
+                latitude=lat,
+                longitude=lng,
                 category=e.get("category"),
             )
             db.add(event)
