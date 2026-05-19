@@ -3,11 +3,12 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import json
-from datetime import date
 import requests
 import hashlib
 from bs4 import BeautifulSoup
+from datetime import date, datetime
 from openai import OpenAI
+from app.utils.geocoding import geocode_address
 
 from db.session import SessionLocal
 from app.models.event import Event
@@ -88,7 +89,7 @@ def save_events_to_db(events, article_url):
         inserted = 0
         updated = 0
         skipped = 0
-        
+
         for e in events:
             if not e.get("title") or not e.get("date"):
                 print(f"    ✗ skipped (missing title/date): {e}")
@@ -111,7 +112,7 @@ def save_events_to_db(events, article_url):
             # Generate stable source_id from article URL + event title + date
             id_source = f"{article_url}|{e['title']}|{e['date']}"
             source_id = hashlib.md5(id_source.encode()).hexdigest()
-            
+
             # Convert lists to comma-separated strings for storage
             special_tags_str = None
             if e.get("special_tags"):
@@ -119,7 +120,7 @@ def save_events_to_db(events, article_url):
                     special_tags_str = ",".join(e["special_tags"])
                 else:
                     special_tags_str = e["special_tags"]
-            
+
             vibe_tags_str = None
             if e.get("vibe_tags"):
                 if isinstance(e["vibe_tags"], list):
@@ -129,14 +130,14 @@ def save_events_to_db(events, article_url):
 
             # Use raw SQL for upsert with ON CONFLICT
             from sqlalchemy import text
-            
+
             insert_stmt = text("""
                 INSERT INTO events 
                     (id, title, description, date, cost, location, category, 
-                     special_tags, vibe_tags, source, source_id, created_at)
+                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude)
                 VALUES 
                     (:id, :title, :description, :date, :cost, :location, :category,
-                     :special_tags, :vibe_tags, :source, :source_id, :created_at)
+                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude)
                 ON CONFLICT (source, source_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     description = EXCLUDED.description,
@@ -145,10 +146,17 @@ def save_events_to_db(events, article_url):
                     location = EXCLUDED.location,
                     category = EXCLUDED.category,
                     special_tags = EXCLUDED.special_tags,
-                    vibe_tags = EXCLUDED.vibe_tags
+                    vibe_tags = EXCLUDED.vibe_tags,
+                    latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude
             """)
-            
+
             try:
+                # Geocode the location if present
+                lat = lng = None
+                if e.get("location"):
+                    lat, lng = geocode_address(e.get("location"))
+
                 result = db.execute(insert_stmt, {
                     "id": __import__('uuid').uuid4(),
                     "title": e["title"],
@@ -162,8 +170,10 @@ def save_events_to_db(events, article_url):
                     "source": "uncoverla",
                     "source_id": source_id,
                     "created_at": datetime.utcnow(),
+                    "latitude": lat,
+                    "longitude": lng,
                 })
-                
+
                 # Check if this was an insert or update by examining the rowcount
                 # Note: On PostgreSQL, rowcount is 1 for both INSERT and UPDATE
                 print(f"    ✓ {'updated' if db.execute(text(f'SELECT 1 FROM events WHERE source_id = :sid'), {'sid': source_id}).first() else 'saved'}: {e['title']}")
@@ -174,22 +184,19 @@ def save_events_to_db(events, article_url):
 
         db.commit()
         print(f"  → {inserted} events saved/updated, {skipped} skipped")
-        
+
         # Deactivate any events whose date has passed
         deactivated = deactivate_past_events(db)
         if deactivated > 0:
             print(f"  → Deactivated {deactivated} past event(s)")
-        
+
         return inserted
     finally:
         db.close()
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+def run_scrape() -> int:
+    """Scrape uncoverla, extract events with OpenAI, upsert into Supabase. Returns count."""
     print("Fetching article links...")
     links = get_article_links()
     print(f"Found {len(links)} articles")
@@ -210,3 +217,11 @@ if __name__ == "__main__":
             print(f"  → Error: {e}")
 
     print(f"\nDone. Total events saved/updated: {total}")
+    return total
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    run_scrape()
