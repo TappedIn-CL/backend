@@ -9,9 +9,9 @@ from jose import jwk, jwt
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-JWKS_URL = f"{SUPABASE_URL}/auth/v1/keys" if SUPABASE_URL else ""
-# Supabase sets iss to this for user JWTs
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
 EXPECTED_ISSUER = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else None
 
 _jwks_data: dict[str, Any] | None = None
@@ -26,7 +26,11 @@ def _fetch_jwks() -> dict[str, Any]:
             detail="SUPABASE_URL is not set; cannot verify JWTs.",
         )
     try:
-        response = requests.get(JWKS_URL, timeout=10)
+        response = requests.get(
+            JWKS_URL,
+            headers={"apikey": SUPABASE_ANON_KEY},
+            timeout=10,
+        )
         response.raise_for_status()
     except requests.RequestException as exc:
         raise HTTPException(
@@ -40,11 +44,7 @@ def get_jwks(*, refresh: bool = False) -> dict[str, Any]:
     """Return JWKS JSON; refresh from Supabase when stale or refresh=True."""
     global _jwks_data, _jwks_fetched_at
     now = time.time()
-    if (
-        refresh
-        or _jwks_data is None
-        or now - _jwks_fetched_at > JWKS_TTL_SEC
-    ):
+    if refresh or _jwks_data is None or now - _jwks_fetched_at > JWKS_TTL_SEC:
         _jwks_data = _fetch_jwks()
         _jwks_fetched_at = now
     return _jwks_data
@@ -59,12 +59,17 @@ def _key_for_kid(jwks: dict[str, Any], kid: str) -> Any | None:
 
 def verify_jwt(token: str) -> dict[str, Any]:
     """
-    Verify a Supabase access JWT (RS256) and return claims.
-    Refreshes JWKS once if the key id is unknown (key rotation).
+    Verify a Supabase access JWT and return claims.
+
+    Supabase currently signs with ES256 (P-256). RS256 is also accepted for
+    compatibility with older deployments. JWKS is fetched once and cached for
+    JWKS_TTL_SEC seconds; refreshed automatically on unknown key id (rotation).
     """
     try:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
+        alg = header.get("alg", "ES256")
+
         if not kid:
             raise HTTPException(status_code=401, detail="Invalid token header")
 
@@ -77,7 +82,7 @@ def verify_jwt(token: str) -> dict[str, Any]:
             raise HTTPException(status_code=401, detail="Unknown signing key")
 
         decode_kwargs: dict[str, Any] = {
-            "algorithms": ["RS256"],
+            "algorithms": [alg],
             "audience": "authenticated",
         }
         if EXPECTED_ISSUER:
