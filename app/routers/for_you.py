@@ -132,5 +132,21 @@ async def get_for_you(
 
     events = db.query(Event).filter(Event.id.in_(event_ids)).all()
     by_id = {e.id: e for e in events}
-    # Preserve Pinecone ranking order
-    return [event_to_hydrated(by_id[eid]) for eid in event_ids if eid in by_id]
+
+    # Build a score lookup keyed on the UUID parsed from each Pinecone match id
+    score_by_id: dict[uuid.UUID, float] = {}
+    for m in matches:
+        try:
+            score_by_id[uuid.UUID(m["id"])] = round(m["score"], 4)
+        except ValueError:
+            pass
+
+    # Preserve Pinecone ranking order and attach the real cosine score
+    results: list[HydratedEventResponse] = []
+    for eid in event_ids:
+        if eid not in by_id:
+            continue
+        hydrated = event_to_hydrated(by_id[eid])
+        hydrated.score = score_by_id.get(eid)
+        results.append(hydrated)
+    return results
