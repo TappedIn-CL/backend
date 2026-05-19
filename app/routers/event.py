@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.models.event import Event
+from app.utils.event_utils import event_to_hydrated
 from db.dependencies import get_db
-from schemas.event import EventCreate, EventResponse
+from schemas.event import EventCreate, EventResponse, HydratedEventResponse
 from app.utils.geocoding import geocode_address
 
 router = APIRouter()
@@ -33,6 +34,34 @@ def list_events(
     return events
 
 
+@router.get("/by-ids", response_model=list[HydratedEventResponse])
+def get_events_by_ids(
+    ids: Annotated[str, Query(description="Comma-separated UUIDs")],
+    db: Session = Depends(get_db),
+) -> list[HydratedEventResponse]:
+    # MUST stay declared before /{event_id} — FastAPI matches routes in order,
+    # and /{event_id} would otherwise swallow "by-ids" as a UUID and 422.
+    id_list = [i.strip() for i in ids.split(",") if i.strip()]
+    if not id_list:
+        return []
+    # Silently skip non-UUID values (e.g. legacy mock IDs left over in Pinecone)
+    # so a single bad value can't 422 an entire batch hydration request.
+    parsed_ids = []
+    for i in id_list:
+        try:
+            parsed_ids.append(uuid.UUID(i))
+        except ValueError:
+            continue
+    if not parsed_ids:
+        return []
+
+    events = db.query(Event).filter(Event.id.in_(parsed_ids)).all()
+    # Preserve request order so the agent's hydrate node can zip results back
+    # against candidate_events without re-sorting.
+    by_id = {e.id: e for e in events}
+    return [event_to_hydrated(by_id[i]) for i in parsed_ids if i in by_id]
+
+
 @router.get("/{event_id}", response_model=EventResponse)
 def get_event(event_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]) -> EventResponse:
     event = db.query(Event).filter(Event.id == event_id).first()
@@ -43,7 +72,6 @@ def get_event(event_id: uuid.UUID, db: Annotated[Session, Depends(get_db)]) -> E
 
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) -> EventResponse:
-    # Convert lists to comma-separated strings for storage
     special_tags_str = ",".join(payload.special_tags) if payload.special_tags else None
     vibe_tags_str = ",".join(payload.vibe_tags) if payload.vibe_tags else None
     
