@@ -39,7 +39,11 @@ def score_events(
     events: list[EventSchema],
     event_vectors: dict[str, list[float]],
 ) -> list[EventSchema]:
-    """Rank events by 0.7*cosine(query, event) + 0.3*cosine(taste, event). Falls back to query-only when taste_vector is None. Events missing from event_vectors are dropped."""
+    """Rank events by 0.7*cosine(query, event) + 0.3*cosine(taste, event). Falls back to query-only when taste_vector is None. Events missing from event_vectors are dropped.
+
+    Returns each event with a "score" field attached (blended cosine score) so
+    downstream consumers (UI, agent response) can display ranking confidence.
+    """
     scored = []
     for event in events:
         ev = event_vectors.get(event["id"])
@@ -53,7 +57,7 @@ def score_events(
             blended = query_score
         scored.append((blended, event))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [event for _, event in scored]
+    return [{**event, "score": score} for score, event in scored]
 
 
 async def compute_taste(state: AgentState) -> AgentState:

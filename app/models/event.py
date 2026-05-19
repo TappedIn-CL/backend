@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, String, UniqueConstraint, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import validates
 from datetime import datetime
@@ -28,11 +28,14 @@ class Event(Base):
     date = Column(DateTime, nullable=False, index=True)
     cost = Column(Float, nullable=False)
     location = Column(String, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
     category = Column(String, nullable=True)
     special_tags = Column(String, nullable=True)
     vibe_tags = Column(String, nullable=True)
     source = Column(String, nullable=True)
     source_id = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (

@@ -52,6 +52,8 @@ class EventCreate(BaseModel):
     title: str
     date: datetime
     cost: float = Field(ge=0)
+    latitude: float | None = None
+    longitude: float | None = None
 
     description: str | None = None
     location: str | None = None
@@ -60,6 +62,7 @@ class EventCreate(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    is_active: bool = True
 
 
 class EventResponse(BaseModel):
@@ -67,6 +70,8 @@ class EventResponse(BaseModel):
     title: str
     date: datetime
     cost: float
+    latitude: float | None = None
+    longitude: float | None = None
 
     description: str | None = None
     location: str | None = None
@@ -75,6 +80,7 @@ class EventResponse(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    is_active: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -115,5 +121,6 @@ class HydratedEventResponse(BaseModel):
     end_time: str | None = None
     image_url: str | None = None
     source_url: str | None = None
+    score: float | None = None  # Pinecone cosine similarity score (0–1); None for fallback events
 
     model_config = ConfigDict(from_attributes=True)

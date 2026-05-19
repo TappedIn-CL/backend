@@ -6,11 +6,13 @@ import json
 import requests
 import hashlib
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import date, datetime
 from openai import OpenAI
+from app.utils.geocoding import geocode_address
 
 from db.session import SessionLocal
 from app.models.event import Event
+from app.utils.event_utils import deactivate_past_events
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -41,25 +43,27 @@ def get_article_text(url):
 
 
 def extract_events_with_openai(article_url, article_text):
+    today = date.today().isoformat()
     prompt = f"""
 You are extracting structured event data from an LA events article.
 
 Article URL: {article_url}
+Current date: {today}
 
 Article text:
 {article_text[:6000]}
 
-Extract each individual event mentioned and return a JSON array. Each event object should have:
+Extract each individual event dated on or after the current date and return a JSON array. Skip past events. Each event object should have:
 - "title": event name (string)
 - "date": start date in ISO format YYYY-MM-DD (string, required — skip event if unknown)
 - "time": time as a string like "7:00 PM" or null if not mentioned
 - "location": venue name and/or address (string or null)
 - "cost": numeric cost in dollars, 0 if free, null if not mentioned
 - "description": 1-2 sentence description (string)
-- "category": one of: Music, Food & Drink, Arts, Sports, Family, Fashion, Wellness, Nightlife, Other
+- "category": the single best-fit category from this exact list: Music, Food & Drink, Arts, Nightlife, Comedy, Wellness, Networking, Sports, Family, Fashion, Other. Use Other only when none of the specific categories fit. Every event must be assigned one of these categories.
 
 Return only valid JSON, no explanation. Example:
-[{{"title": "...", "date": "2026-04-25", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
+[{{"title": "...", "date": "{today}", "time": "7:00 PM", "location": "...", "cost": 0, "description": "...", "category": "Music"}}]
 """
 
     response = client.chat.completions.create(
@@ -85,7 +89,7 @@ def save_events_to_db(events, article_url):
         inserted = 0
         updated = 0
         skipped = 0
-        
+
         for e in events:
             if not e.get("title") or not e.get("date"):
                 print(f"    ✗ skipped (missing title/date): {e}")
@@ -108,7 +112,7 @@ def save_events_to_db(events, article_url):
             # Generate stable source_id from article URL + event title + date
             id_source = f"{article_url}|{e['title']}|{e['date']}"
             source_id = hashlib.md5(id_source.encode()).hexdigest()
-            
+
             # Convert lists to comma-separated strings for storage
             special_tags_str = None
             if e.get("special_tags"):
@@ -116,7 +120,7 @@ def save_events_to_db(events, article_url):
                     special_tags_str = ",".join(e["special_tags"])
                 else:
                     special_tags_str = e["special_tags"]
-            
+
             vibe_tags_str = None
             if e.get("vibe_tags"):
                 if isinstance(e["vibe_tags"], list):
@@ -126,14 +130,14 @@ def save_events_to_db(events, article_url):
 
             # Use raw SQL for upsert with ON CONFLICT
             from sqlalchemy import text
-            
+
             insert_stmt = text("""
                 INSERT INTO events 
                     (id, title, description, date, cost, location, category, 
-                     special_tags, vibe_tags, source, source_id, created_at)
+                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude)
                 VALUES 
                     (:id, :title, :description, :date, :cost, :location, :category,
-                     :special_tags, :vibe_tags, :source, :source_id, :created_at)
+                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude)
                 ON CONFLICT (source, source_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     description = EXCLUDED.description,
@@ -142,10 +146,17 @@ def save_events_to_db(events, article_url):
                     location = EXCLUDED.location,
                     category = EXCLUDED.category,
                     special_tags = EXCLUDED.special_tags,
-                    vibe_tags = EXCLUDED.vibe_tags
+                    vibe_tags = EXCLUDED.vibe_tags,
+                    latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude
             """)
-            
+
             try:
+                # Geocode the location if present
+                lat = lng = None
+                if e.get("location"):
+                    lat, lng = geocode_address(e.get("location"))
+
                 result = db.execute(insert_stmt, {
                     "id": __import__('uuid').uuid4(),
                     "title": e["title"],
@@ -159,8 +170,10 @@ def save_events_to_db(events, article_url):
                     "source": "uncoverla",
                     "source_id": source_id,
                     "created_at": datetime.utcnow(),
+                    "latitude": lat,
+                    "longitude": lng,
                 })
-                
+
                 # Check if this was an insert or update by examining the rowcount
                 # Note: On PostgreSQL, rowcount is 1 for both INSERT and UPDATE
                 print(f"    ✓ {'updated' if db.execute(text(f'SELECT 1 FROM events WHERE source_id = :sid'), {'sid': source_id}).first() else 'saved'}: {e['title']}")
@@ -171,6 +184,12 @@ def save_events_to_db(events, article_url):
 
         db.commit()
         print(f"  → {inserted} events saved/updated, {skipped} skipped")
+
+        # Deactivate any events whose date has passed
+        deactivated = deactivate_past_events(db)
+        if deactivated > 0:
+            print(f"  → Deactivated {deactivated} past event(s)")
+
         return inserted
     finally:
         db.close()
