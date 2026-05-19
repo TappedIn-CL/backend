@@ -3,42 +3,24 @@ import time
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from agent.graph import agent
-from auth.deps import get_optional_jwt_payload
+from agent.recommendations import recommend_for_you
+from auth.profile import get_user_profile_optional, get_user_profile_required
 from db.dependencies import get_db
-from app.models.user import User
 from schemas.agent import AgentQueryRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-async def get_user_profile(
-    payload: Annotated[dict | None, Depends(get_optional_jwt_payload)],
-    db: Session = Depends(get_db),
-) -> dict | None:
-    if not payload:
-        return None
-
-    user_id = payload.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return None
-
-    return {
-        "interests": user.interests or [],
-        "favorited_tags": [],
-    }
-
-
 @router.post("/query")
 async def agent_query(
     payload: AgentQueryRequest,
-    user_profile: Annotated[dict | None, Depends(get_user_profile)],
+    user_profile: Annotated[dict | None, Depends(get_user_profile_optional)],
 ):
     async def event_generator():
         start_time = time.time()
@@ -81,3 +63,26 @@ async def agent_query(
             yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/for-you")
+async def for_you(
+    user_profile: Annotated[dict, Depends(get_user_profile_required)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Query-less personalized event feed.
+
+    Builds a taste vector from the user's interests, vibes, and past
+    favorited event vectors, then ranks candidates by taste similarity.
+    Excludes already-favorited events. Cold-start users (no signals) get a
+    recency-ordered fallback so the page is never empty.
+    """
+    start_time = time.time()
+    events = await recommend_for_you(user_profile, db, limit=limit)
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {
+        "events": events,
+        "count": len(events),
+        "latency_ms": latency_ms,
+    }

@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from uuid import UUID
-from datetime import date
+from datetime import date, datetime
 
 
 class UserCreate(BaseModel):
@@ -57,3 +57,14 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FavoriteCreate(BaseModel):
+    event_id: UUID
+
+
+class FavoriteResponse(BaseModel):
+    event_id: UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
