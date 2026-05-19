@@ -28,6 +28,9 @@ class UserCreate(BaseModel):
     occupation: str | None = None
     interests: list[str] | None = None
 
+    # favorite events
+    favorite_events: list[str] | None = None
+
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
@@ -54,6 +57,9 @@ class UserResponse(BaseModel):
     neighborhood: str | None = None
     occupation: str | None = None
     interests: list[str] | None = None
+
+    # favorite events
+    favorite_events: list[str] | None = None
 
     class Config:
         from_attributes = True

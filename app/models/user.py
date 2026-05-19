@@ -31,3 +31,6 @@ class User(Base):
     neighborhood = Column(String, nullable=True)
     occupation = Column(String, nullable=True)
     interests = Column(ARRAY(String), nullable=True)
+
+    # favorite events
+    favorite_events = Column(ARRAY(String), nullable=True)
