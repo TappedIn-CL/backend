@@ -121,5 +121,6 @@ class HydratedEventResponse(BaseModel):
     end_time: str | None = None
     image_url: str | None = None
     source_url: str | None = None
+    score: float | None = None  # Pinecone cosine similarity score (0–1); None for fallback events
 
     model_config = ConfigDict(from_attributes=True)
