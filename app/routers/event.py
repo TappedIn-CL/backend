@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.event import Event
 from db.dependencies import get_db
 from schemas.event import EventCreate, EventResponse
+from app.utils.geocoding import geocode_address
 
 router = APIRouter()
 
@@ -46,6 +47,14 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
     special_tags_str = ",".join(payload.special_tags) if payload.special_tags else None
     vibe_tags_str = ",".join(payload.vibe_tags) if payload.vibe_tags else None
     
+    # If client didn't provide coordinates but provided a location string, try geocoding
+    lat = payload.latitude
+    lng = payload.longitude
+    if (lat is None or lng is None) and payload.location:
+        g_lat, g_lng = geocode_address(payload.location)
+        if g_lat is not None and g_lng is not None:
+            lat, lng = g_lat, g_lng
+
     event = Event(
         id=uuid.uuid4(),
         title=payload.title,
@@ -53,8 +62,8 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         date=payload.date,
         cost=payload.cost,
         location=payload.location,
-        latitude=payload.latitude,
-        longitude=payload.longitude,
+        latitude=lat,
+        longitude=lng,
         category=payload.category,
         special_tags=special_tags_str,
         vibe_tags=vibe_tags_str,
