@@ -7,6 +7,7 @@ from db.session import engine, Base
 # Import models (IMPORTANT for table creation)
 from app.models import user
 from app.models import event
+from app.models import favorite
 
 # Import routes
 from app.routers.event import router as event_router
