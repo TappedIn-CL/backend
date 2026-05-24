@@ -41,8 +41,8 @@ def _parse_price_max(price_range: str | None) -> float | None:
 
 def _build_profile(user: User, favorited_event_ids: list[str]) -> dict:
     return {
-        "interests": user.interests or [],
-        "vibes": user.vibes or [],
+        "interests": [i for i in (user.interests or []) if i],
+        "vibes": [v for v in (user.vibes or []) if v],
         "favorited_tags": [],
         "favorited_event_ids": favorited_event_ids,
         "price_max": _parse_price_max(user.price_range),

@@ -1,7 +1,7 @@
 """add user_favorites table
 
 Revision ID: a1f2e3d4c5b6
-Revises: 43b41105019a
+Revises: f40907e85090
 Create Date: 2026-05-18 15:00:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "a1f2e3d4c5b6"
-down_revision: Union[str, None] = "43b41105019a"
+down_revision: Union[str, None] = "f40907e85090"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

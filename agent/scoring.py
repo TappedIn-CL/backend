@@ -47,11 +47,20 @@ def _mean_vector(vectors: list[list[float]]) -> list[float] | None:
     return [sum(v[i] for v in vectors) / len(vectors) for i in range(dim)]
 
 
+def _clean_str_list(items: list[str] | None) -> list[str]:
+    if not items:
+        return []
+    return [str(x).strip() for x in items if x is not None and str(x).strip()]
+
+
 def _build_taste_text(
     interests: list[str],
     vibes: list[str],
     favorited_tags: list[str],
 ) -> str:
+    interests = _clean_str_list(interests)
+    vibes = _clean_str_list(vibes)
+    favorited_tags = _clean_str_list(favorited_tags)
     parts = []
     if interests:
         parts.append("Interests: " + ", ".join(interests))
@@ -77,7 +86,9 @@ def compute_taste_vector(
       vectors only     → mean(event_vecs)
       neither          → None
     """
-    vibes = vibes or []
+    vibes = _clean_str_list(vibes)
+    interests = _clean_str_list(interests)
+    favorited_tags = _clean_str_list(favorited_tags)
     favorited_event_vectors = favorited_event_vectors or []
 
     text_present = bool(interests or vibes or favorited_tags)

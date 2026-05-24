@@ -11,7 +11,6 @@ from app.models import favorite
 
 # Import routes
 from app.routers.event import router as event_router
-from app.routers.for_you import router as for_you_router
 from app.routers.user import router as user_router
 from app.routers.agent import router as agent_router
 
@@ -38,7 +37,6 @@ app.add_middleware(
 # -------------------------
 app.include_router(user_router, prefix="/users", tags=["users"])
 app.include_router(event_router, prefix="/events", tags=["events"])
-app.include_router(for_you_router, prefix="/for-you", tags=["for-you"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
 # -------------------------
 # Root endpoint
