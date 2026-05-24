@@ -16,7 +16,9 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
+import importlib
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
@@ -26,7 +28,6 @@ from app.utils.event_utils import event_to_hydrated
 from ingestion.enrichment import enrich_event
 from ingestion.embed import embed_and_upsert
 from agent.pinecone_client import fetch_vectors
-from scrapers.uncoverla import run_scrape
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,10 +35,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Files in the scrapers folder that are not scrapers
+_SKIP = {"run_pipeline", "date_utils", "__init__"}
+
+
+def _discover_scrapers() -> list[tuple[str, callable]]:
+    """
+    Auto-discover all scraper modules in this folder.
+
+    Convention — a file is treated as a scraper if it exposes either:
+      (a) run_scrape()              — handles scraping + saving internally, or
+      (b) scrape_*() + save_events_to_db() — separate scrape and save functions
+
+    Returns a list of (name, callable) pairs ready to call with no arguments.
+    Adding a new source only requires dropping a new .py file in this folder
+    that follows the convention above — no changes to this file needed.
+    """
+    scrapers_dir = Path(__file__).parent
+    found = []
+    for path in sorted(scrapers_dir.glob("*.py")):
+        name = path.stem
+        if name in _SKIP or name.startswith("_"):
+            continue
+        try:
+            mod = importlib.import_module(f"scrapers.{name}")
+        except Exception as e:
+            logger.warning("  Could not import scrapers.%s: %s", name, e)
+            continue
+
+        if hasattr(mod, "run_scrape"):
+            found.append((name, mod.run_scrape))
+        else:
+            scrape_fn = next(
+                (getattr(mod, fn) for fn in dir(mod) if fn.startswith("scrape_")),
+                None,
+            )
+            save_fn = getattr(mod, "save_events_to_db", None)
+            if scrape_fn and save_fn:
+                found.append((name, lambda s=scrape_fn, sv=save_fn: sv(s())))
+
+    return found
+
 
 def stage_scrape() -> int:
     logger.info("=== Stage 1: SCRAPE ===")
-    return run_scrape()
+    scrapers = _discover_scrapers()
+    logger.info("Discovered %d scraper(s): %s", len(scrapers), [n for n, _ in scrapers])
+    total = 0
+    for name, fn in scrapers:
+        try:
+            logger.info("  → running %s", name)
+            result = fn()
+            count = result if isinstance(result, int) else 0
+            logger.info("  ✓ %s: %d events", name, count)
+            total += count
+        except Exception as e:
+            logger.warning("  ✗ %s failed: %s", name, e)
+    logger.info("Stage 1 complete: %d total events scraped", total)
+    return total
 
 
 def stage_enrich() -> int:
