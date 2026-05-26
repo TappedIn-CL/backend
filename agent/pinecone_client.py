@@ -93,10 +93,25 @@ def search_events(
     ]
 
 
+_FETCH_BATCH_SIZE = 100
+
+
 def fetch_vectors(ids: list[str]) -> dict[str, list[float]]:
-    """Batch-fetch event vectors by ID. IDs not found in the index are silently omitted."""
+    """Batch-fetch event vectors by ID. IDs not found in the index are silently omitted.
+
+    Pinecone's fetch endpoint uses GET with IDs as query params, so large ID
+    lists cause 414 Request-URI Too Large. We chunk into batches of
+    _FETCH_BATCH_SIZE to stay well within URL length limits.
+    """
     if not ids:
         return {}
     index = _get_index()
-    response = index.fetch(ids=ids)
-    return {vec_id: vec.values for vec_id, vec in response.vectors.items()}
+    result: dict[str, list[float]] = {}
+    for i in range(0, len(ids), _FETCH_BATCH_SIZE):
+        batch = ids[i : i + _FETCH_BATCH_SIZE]
+        try:
+            response = index.fetch(ids=batch)
+            result.update({vec_id: vec.values for vec_id, vec in response.vectors.items()})
+        except Exception as e:
+            logger.error("fetch_vectors batch %d-%d failed: %s", i, i + len(batch), e)
+    return result

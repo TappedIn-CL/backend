@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from uuid import UUID
-from datetime import date
+from datetime import date, datetime
 
 
 class UserCreate(BaseModel):
@@ -27,9 +27,6 @@ class UserCreate(BaseModel):
     neighborhood: str | None = None
     occupation: str | None = None
     interests: list[str] | None = None
-
-    # favorite events
-    favorite_events: list[str] | None = None
 
 class UserResponse(BaseModel):
     id: UUID
@@ -58,8 +55,16 @@ class UserResponse(BaseModel):
     occupation: str | None = None
     interests: list[str] | None = None
 
-    # favorite events
-    favorite_events: list[str] | None = None
-
     class Config:
         from_attributes = True
+
+
+class FavoriteCreate(BaseModel):
+    event_id: UUID
+
+
+class FavoriteResponse(BaseModel):
+    event_id: UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

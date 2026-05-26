@@ -1,10 +1,17 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends
-from auth.deps import get_jwt_payload
+from uuid import UUID
 
-from requests import Session
-from db.dependencies import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.models.event import Event
+from app.models.favorite import UserFavorite
 from app.models.user import User
+from app.utils.event_utils import event_to_hydrated
+from auth.deps import get_jwt_payload, get_supabase_sub
+from db.dependencies import get_db
+from schemas.event import HydratedEventResponse
+from schemas.user import FavoriteCreate, FavoriteResponse
 
 router = APIRouter()
 
@@ -31,7 +38,7 @@ def read_me(
             "search_radius": user.search_radius,
             "price_range": user.price_range,
             "preferred_days": user.preferred_days,
-            
+
             "email_notifs": user.email_notifs,
             "push_notifs": user.push_notifs,
             "sms_notifs": user.sms_notifs,
@@ -43,65 +50,75 @@ def read_me(
             "neighborhood": user.neighborhood,
             "occupation": user.occupation,
             "interests": user.interests,
-
-            # favorite events
-            "favorite_events": user.favorite_events,
         }
-    
+
     return {"message": "user not found in database, but JWT is valid."}
 
-@router.get("/me/favorites")
-def read_favorite_events(
-    payload: Annotated[dict, Depends(get_jwt_payload)],
+
+@router.post(
+    "/me/favorites",
+    response_model=FavoriteResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_favorite(
+    payload: FavoriteCreate,
+    user_id: Annotated[str, Depends(get_supabase_sub)],
     db: Annotated[Session, Depends(get_db)],
-):
-    id = payload.get("sub")
-    user = db.query(User).filter(User.id == id).first()
+) -> FavoriteResponse:
+    # Confirm the event exists so we don't store dangling references.
+    # FK would catch this at flush time, but pre-checking gives a clean 404.
+    event = db.query(Event).filter(Event.id == payload.event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
 
-    if user:
-        return {
-            "favorite_events": user.favorite_events or [],
-        }
-    
-    return {"message": "user not found in database, but JWT is valid."}
+    existing = (
+        db.query(UserFavorite)
+        .filter(
+            UserFavorite.user_id == user_id,
+            UserFavorite.event_id == payload.event_id,
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
 
-@router.post("/me/favorites")
-def add_favorite_event(
-    event_id: str,
-    payload: Annotated[dict, Depends(get_jwt_payload)],
+    fav = UserFavorite(user_id=user_id, event_id=payload.event_id)
+    db.add(fav)
+    db.commit()
+    db.refresh(fav)
+    return fav
+
+
+@router.delete("/me/favorites/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_favorite(
+    event_id: UUID,
+    user_id: Annotated[str, Depends(get_supabase_sub)],
     db: Annotated[Session, Depends(get_db)],
-):
-    id = payload.get("sub")
-    user = db.query(User).filter(User.id == id).first()
+) -> None:
+    fav = (
+        db.query(UserFavorite)
+        .filter(
+            UserFavorite.user_id == user_id,
+            UserFavorite.event_id == event_id,
+        )
+        .first()
+    )
+    if fav is None:
+        raise HTTPException(status_code=404, detail="Favorite not found")
+    db.delete(fav)
+    db.commit()
 
-    if user:
-        favorite_events = user.favorite_events or []
-        
-        if event_id not in favorite_events:
-            user.favorite_events = favorite_events + [event_id] # avoid mutating the list in-place if it's already set since SQLAlchemy can be picky about this
-            db.commit()
-            return {"message": "Event added to favorites."}
-        else:
-            return {"message": "Event already in favorites."}
 
-    return {"message": "user not found in database, but JWT is valid."}
-
-@router.delete("/me/favorites/{event_id}")
-def remove_favorite_event(
-    event_id: str,
-    payload: Annotated[dict, Depends(get_jwt_payload)],
+@router.get("/me/favorites", response_model=list[HydratedEventResponse])
+def list_favorites(
+    user_id: Annotated[str, Depends(get_supabase_sub)],
     db: Annotated[Session, Depends(get_db)],
-):
-    id = payload.get("sub")
-    user = db.query(User).filter(User.id == id).first()
-
-    if user:
-        favorite_events = user.favorite_events or []
-        if event_id in favorite_events:
-            user.favorite_events = [e for e in favorite_events if e != event_id]
-            db.commit()
-            return {"message": "Event removed from favorites."}
-        else:
-            return {"message": "Event not found in favorites."}
-
-    return {"message": "user not found in database, but JWT is valid."}
+) -> list[HydratedEventResponse]:
+    rows = (
+        db.query(Event)
+        .join(UserFavorite, UserFavorite.event_id == Event.id)
+        .filter(UserFavorite.user_id == user_id)
+        .order_by(UserFavorite.created_at.desc())
+        .all()
+    )
+    return [event_to_hydrated(e) for e in rows]
