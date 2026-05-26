@@ -16,6 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.models.event import ALLOWED_EVENT_CATEGORIES, ALLOWED_SPECIAL_TAGS, VIBE_TAGS, Event
+from app.utils.event_utils import enforce_coordinates_for_ingestion, is_event_active
 from db.session import SessionLocal
 from scrapers.date_utils import parse_event_datetime
 
@@ -331,7 +332,14 @@ def save_events_to_db(events):
                 "vibe_tags": event_data.get("vibe_tags"),
                 "source": "averagesocialite",
                 "source_id": source_id,
+                "is_active": is_event_active(event_date),
             }
+
+            values, skip_reason = enforce_coordinates_for_ingestion(values)
+            if skip_reason:
+                print(f"    x skipped missing coordinates ({skip_reason}): {event_data.get('title')}")
+                skipped += 1
+                continue
 
             if existing:
                 for key, value in values.items():

@@ -8,11 +8,10 @@ import hashlib
 from bs4 import BeautifulSoup
 from datetime import date, datetime
 from openai import OpenAI
-from app.utils.geocoding import geocode_address
 
 from db.session import SessionLocal
 from app.models.event import Event
-from app.utils.event_utils import deactivate_past_events
+from app.utils.event_utils import deactivate_past_events, enforce_coordinates_for_ingestion, is_event_active
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -134,10 +133,10 @@ def save_events_to_db(events, article_url):
             insert_stmt = text("""
                 INSERT INTO events 
                     (id, title, description, date, cost, location, category, 
-                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude)
+                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude, is_active)
                 VALUES 
                     (:id, :title, :description, :date, :cost, :location, :category,
-                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude)
+                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude, :is_active)
                 ON CONFLICT (source, source_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     description = EXCLUDED.description,
@@ -148,14 +147,20 @@ def save_events_to_db(events, article_url):
                     special_tags = EXCLUDED.special_tags,
                     vibe_tags = EXCLUDED.vibe_tags,
                     latitude = EXCLUDED.latitude,
-                    longitude = EXCLUDED.longitude
+                        longitude = EXCLUDED.longitude,
+                        is_active = EXCLUDED.is_active
             """)
 
             try:
-                # Geocode the location if present
-                lat = lng = None
-                if e.get("location"):
-                    lat, lng = geocode_address(e.get("location"))
+                values, skip_reason = enforce_coordinates_for_ingestion({
+                    "location": e.get("location"),
+                    "latitude": None,
+                    "longitude": None,
+                })
+                if skip_reason:
+                    print(f"    ✗ skipped missing coordinates ({skip_reason}): {e.get('title')}")
+                    skipped += 1
+                    continue
 
                 result = db.execute(insert_stmt, {
                     "id": __import__('uuid').uuid4(),
@@ -170,8 +175,9 @@ def save_events_to_db(events, article_url):
                     "source": "uncoverla",
                     "source_id": source_id,
                     "created_at": datetime.utcnow(),
-                    "latitude": lat,
-                    "longitude": lng,
+                    "latitude": values["latitude"],
+                    "longitude": values["longitude"],
+                    "is_active": is_event_active(date),
                 })
 
                 # Check if this was an insert or update by examining the rowcount
@@ -185,7 +191,6 @@ def save_events_to_db(events, article_url):
         db.commit()
         print(f"  → {inserted} events saved/updated, {skipped} skipped")
 
-        # Deactivate any events whose date has passed
         deactivated = deactivate_past_events(db)
         if deactivated > 0:
             print(f"  → Deactivated {deactivated} past event(s)")

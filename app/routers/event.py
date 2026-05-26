@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.models.event import Event
-from app.utils.event_utils import event_to_hydrated
+from app.utils.event_utils import event_to_hydrated, is_event_active
 from db.dependencies import get_db
 from schemas.event import EventCreate, EventResponse, HydratedEventResponse
 from app.utils.geocoding import geocode_address
@@ -95,6 +95,7 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         category=payload.category,
         special_tags=special_tags_str,
         vibe_tags=vibe_tags_str,
+        is_active=is_event_active(payload.date),
     )
     db.add(event)
     db.commit()

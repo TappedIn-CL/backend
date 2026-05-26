@@ -10,7 +10,7 @@ from openai import OpenAI
 from db.session import SessionLocal
 from app.models.event import Event
 from scrapers.date_utils import is_current_or_future_event, parse_event_datetime
-from app.utils.geocoding import geocode_address
+from app.utils.event_utils import enforce_coordinates_for_ingestion, is_event_active
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -108,21 +108,21 @@ def save_events_to_db(events):
                 print(f"    ✗ skipped past event: {e['title']} ({e['date']})")
                 continue
 
-            # Geocode location (if present) once per event
-            lat = lng = None
-            if e.get("location"):
-                lat, lng = geocode_address(e.get("location"))
+            values = {
+                "title": e["title"],
+                "description": e.get("description"),
+                "date": date,
+                "cost": 0.0,
+                "location": e.get("location"),
+                "category": e.get("category"),
+                "is_active": is_event_active(date),
+            }
+            values, skip_reason = enforce_coordinates_for_ingestion(values)
+            if skip_reason:
+                print(f"    ✗ skipped missing coordinates ({skip_reason}): {e.get('title')}")
+                continue
 
-            event = Event(
-                title=e["title"],
-                description=e.get("description"),
-                date=date,
-                cost=0.0,
-                location=e.get("location"),
-                latitude=lat,
-                longitude=lng,
-                category=e.get("category"),
-            )
+            event = Event(**values)
             db.add(event)
             print(f"    ✓ saving: {e['title']}")
             added += 1

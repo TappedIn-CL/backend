@@ -1,6 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any
 from sqlalchemy.orm import Session
 from app.models.event import Event
+from app.utils.geocoding import geocode_address
 from schemas.event import HydratedEventResponse
 
 
@@ -8,6 +10,33 @@ def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+
+def enforce_coordinates_for_ingestion(values: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """Ensure an event payload has geocoded coordinates before DB write.
+
+    Returns (values, None) when coordinates are present/resolved.
+    Returns (None, reason) when the row should be skipped.
+    """
+    location = values.get("location")
+    if not location:
+        return None, "missing location"
+
+    lat = values.get("latitude")
+    lng = values.get("longitude")
+    if lat is None or lng is None:
+        lat, lng = geocode_address(location)
+
+    if lat is None or lng is None:
+        return None, "geocode failed"
+
+    values["latitude"] = lat
+    values["longitude"] = lng
+    return values, None
+
+
+def is_event_active(event_date: datetime, today: date | None = None) -> bool:
+    return event_date.date() >= (today or date.today())
 
 
 def event_to_hydrated(event: Event) -> HydratedEventResponse:
