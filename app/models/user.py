@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, String, Integer, Boolean
+from sqlalchemy import Column, Date, String, Integer, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from db.session import Base
 import uuid
@@ -13,6 +13,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
+    avatar_url = Column(Text, nullable=True)
 
     # preferences tab
     vibes = Column(ARRAY(String), nullable=True)
@@ -31,3 +32,5 @@ class User(Base):
     neighborhood = Column(String, nullable=True)
     occupation = Column(String, nullable=True)
     interests = Column(ARRAY(String), nullable=True)
+    favorite_events = Column(ARRAY(String), nullable=True)
+    going_to_events = Column(ARRAY(String), nullable=True)
