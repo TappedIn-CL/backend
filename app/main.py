@@ -8,11 +8,14 @@ from db.session import engine, Base
 from app.models import user
 from app.models import event
 from app.models import favorite
+from app.models import going_to
+from app.models import google_credentials
 
 # Import routes
 from app.routers.event import router as event_router
 from app.routers.user import router as user_router
 from app.routers.agent import router as agent_router
+from app.routers.integrations_google import router as integrations_google_router
 
 app = FastAPI()
 
@@ -38,6 +41,11 @@ app.add_middleware(
 app.include_router(user_router, prefix="/users", tags=["users"])
 app.include_router(event_router, prefix="/events", tags=["events"])
 app.include_router(agent_router, prefix="/agent", tags=["agent"])
+app.include_router(
+    integrations_google_router,
+    prefix="/integrations/google",
+    tags=["integrations-google"],
+)
 # -------------------------
 # Root endpoint
 # -------------------------
