@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import os
 
 from db.session import Base
-from app.models import user, event
+from app.models import user, event, friendship
 
 load_dotenv()
 

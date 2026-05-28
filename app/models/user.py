@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, String, Integer, Boolean
+from sqlalchemy import Column, Date, String, Integer, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from db.session import Base
 import uuid
@@ -13,24 +13,26 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=True)
     full_name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
+    avatar_url = Column(Text, nullable=True)
 
     # preferences tab
     vibes = Column(ARRAY(String), nullable=True)
-    search_radius = Column(Integer, nullable=True) # lookup table in future?
-    price_range = Column(String, nullable=True) # lookup table in future?
-    preferred_days = Column(ARRAY(String), nullable=True) # lookup table in future?
+    search_radius = Column(Integer, nullable=True)
+    price_range = Column(String, nullable=True)
+    preferred_days = Column(ARRAY(String), nullable=True)
 
-    email_notifs = Column(Boolean, nullable=False, default=True) # lookup table in future?
-    push_notifs = Column(Boolean, nullable=False, default=True) # lookup table in future?
-    sms_notifs = Column(Boolean, nullable=False, default=True) # lookup table in future?
+    email_notifs = Column(Boolean, nullable=False, default=True)
+    push_notifs = Column(Boolean, nullable=False, default=True)
+    sms_notifs = Column(Boolean, nullable=False, default=True)
 
     # demographics tab
     date_of_birth = Column(Date, nullable=True)
-    pronouns = Column(String, nullable=True) # lookup table in future?
-    gender = Column(String, nullable=True) # lookup table in future?
+    pronouns = Column(String, nullable=True)
+    gender = Column(String, nullable=True)
     neighborhood = Column(String, nullable=True)
     occupation = Column(String, nullable=True)
     interests = Column(ARRAY(String), nullable=True)
 
-    # favorite events
+    # legacy array — prefer user_favorites junction table for new writes
     favorite_events = Column(ARRAY(String), nullable=True)
+    going_to_events = Column(ARRAY(String), nullable=True)
