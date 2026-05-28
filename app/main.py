@@ -1,5 +1,10 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# TODO(jason): tune log level / wire dictConfig before merging GCal debug work
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 # DB setup
 from db.session import engine, Base

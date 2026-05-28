@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -31,6 +32,7 @@ from schemas.user import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _favorite_ids(db: Session, user_id: uuid.UUID) -> list[str]:
@@ -222,7 +224,8 @@ def list_favorites(
 def _try_calendar_insert(user_id: str, db: Session, event: Event) -> tuple[str | None, CalendarSync]:
     if event.date is None:
         return None, CalendarSync(ok=False, reason="missing_time")
-    if event.date < datetime.utcnow():
+    # TODO(jason): re-enable past-event skip before merging
+    if False and event.date < datetime.utcnow():
         return None, CalendarSync(ok=False, reason="past_event")
     try:
         gcal_id = google_calendar.insert_event(user_id, db, event)
@@ -267,10 +270,16 @@ def add_going_to(
         db.commit()
         db.refresh(row)
 
+    logger.info(
+        "add_going_to: user=%s event=%s existing_gcal_id=%r event.date=%r",
+        user_id, payload.event_id, row.google_event_id, event.date,
+    )
     if row.google_event_id:
         sync = CalendarSync(ok=True)
+        logger.info("add_going_to: skipping insert, row already has google_event_id=%s", row.google_event_id)
     else:
         gcal_id, sync = _try_calendar_insert(user_id, db, event)
+        logger.info("add_going_to: _try_calendar_insert returned gcal_id=%r sync=%r", gcal_id, sync)
         if gcal_id is not None:
             row.google_event_id = gcal_id
             db.commit()

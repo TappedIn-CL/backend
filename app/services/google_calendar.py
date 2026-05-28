@@ -75,6 +75,12 @@ def _get_service(user_id: str, db: Session):
 
 def insert_event(user_id: str, db: Session, event: Event) -> str:
     """Insert event into the user's primary calendar; return the new GCal event id."""
+    now = datetime.utcnow()
+    logger.info(
+        "insert_event: user=%s event_id=%s event.date=%r utcnow=%r is_past=%s",
+        user_id, event.id, event.date, now, (event.date is not None and event.date < now),
+    )
+
     service = _get_service(user_id, db)
 
     start = event.date
@@ -89,16 +95,25 @@ def insert_event(user_id: str, db: Session, event: Event) -> str:
             "private": {"tappedin_event_id": str(event.id)},
         },
     }
+    logger.info("insert_event: calendarId=%s body=%r", CALENDAR_ID, body)
 
     try:
         created = service.events().insert(calendarId=CALENDAR_ID, body=body).execute()
     except HttpError as e:
         status = getattr(e.resp, "status", None)
         if status in (401, 403):
+            logger.exception("GCal insert auth failure (status=%s) user=%s event=%s", status, user_id, event.id)
             raise CalendarSyncError("needs_reconnect", message=str(e)) from e
         logger.exception("GCal insert failed for user %s event %s", user_id, event.id)
         raise CalendarSyncError("unknown", message=str(e)) from e
+    except Exception as e:
+        logger.exception("GCal insert unexpected error for user %s event %s", user_id, event.id)
+        raise CalendarSyncError("unknown", message=str(e)) from e
 
+    logger.info(
+        "insert_event: GCal response id=%s htmlLink=%s status=%s",
+        created.get("id"), created.get("htmlLink"), created.get("status"),
+    )
     return created["id"]
 
 
