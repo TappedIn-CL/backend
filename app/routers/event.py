@@ -90,6 +90,7 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         date=payload.date,
         cost=payload.cost,
         location=payload.location,
+        website=payload.website,
         latitude=lat,
         longitude=lng,
         category=payload.category,

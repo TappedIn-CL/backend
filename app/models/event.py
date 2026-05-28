@@ -28,6 +28,7 @@ class Event(Base):
     date = Column(DateTime, nullable=False, index=True)
     cost = Column(Float, nullable=False)
     location = Column(String, nullable=True)
+    website = Column(String, nullable=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     category = Column(String, nullable=True)

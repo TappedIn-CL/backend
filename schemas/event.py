@@ -52,6 +52,7 @@ class EventCreate(BaseModel):
     title: str
     date: datetime
     cost: float = Field(ge=0)
+    website: str | None = None
     latitude: float | None = None
     longitude: float | None = None
 
@@ -70,6 +71,7 @@ class EventResponse(BaseModel):
     title: str
     date: datetime
     cost: float
+    website: str | None = None
     latitude: float | None = None
     longitude: float | None = None
 
@@ -112,6 +114,7 @@ class HydratedEventResponse(BaseModel):
     vibe_tags: list[str] = []
     venue_name: str | None = None
     address: str | None = None
+    website: str | None = None
     city: str = "Los Angeles"
     latitude: float | None = None
     longitude: float | None = None
