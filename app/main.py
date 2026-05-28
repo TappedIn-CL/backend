@@ -10,6 +10,7 @@ from app.models import event
 from app.models import favorite
 from app.models import going_to
 from app.models import google_credentials
+from app.models import friendship
 
 # Import routes
 from app.routers.event import router as event_router
@@ -46,6 +47,7 @@ app.include_router(
     prefix="/integrations/google",
     tags=["integrations-google"],
 )
+
 # -------------------------
 # Root endpoint
 # -------------------------
