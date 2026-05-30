@@ -1,5 +1,11 @@
 from unittest.mock import patch, MagicMock
-from agent.pinecone_client import _build_record, upsert_events, search_events, fetch_vectors
+from agent.pinecone_client import (
+    _build_record,
+    upsert_events,
+    search_events,
+    fetch_vectors,
+    delete_vectors,
+)
 
 MOCK_EVENT = {
     "id": "evt-001",
@@ -147,6 +153,40 @@ def test_fetch_vectors_empty_ids_returns_empty_dict():
 
     assert result == {}
     mock_index.fetch.assert_not_called()
+
+
+@patch("agent.pinecone_client._get_index")
+def test_delete_vectors_returns_count(mock_get_index):
+    mock_index = MagicMock()
+    mock_get_index.return_value = mock_index
+    count = delete_vectors(["evt-001", "evt-002"])
+    assert count == 2
+    mock_index.delete.assert_called_once_with(ids=["evt-001", "evt-002"])
+
+
+def test_delete_vectors_empty_ids_returns_zero_without_index():
+    with patch("agent.pinecone_client._get_index") as mock_get_index:
+        assert delete_vectors([]) == 0
+        mock_get_index.assert_not_called()
+
+
+@patch("agent.pinecone_client._get_index")
+def test_delete_vectors_batches_at_1000(mock_get_index):
+    mock_index = MagicMock()
+    mock_get_index.return_value = mock_index
+    ids = [f"evt-{i:04d}" for i in range(2500)]
+    count = delete_vectors(ids)
+    assert count == 2500
+    assert mock_index.delete.call_count == 3  # 1000 + 1000 + 500
+
+
+@patch("agent.pinecone_client._get_index")
+def test_delete_vectors_skips_failed_batch_in_count(mock_get_index):
+    mock_index = MagicMock()
+    mock_index.delete.side_effect = Exception("Pinecone timeout")
+    mock_get_index.return_value = mock_index
+    count = delete_vectors(["evt-001"])
+    assert count == 0
 
 
 def test_fetch_vectors_multiple_ids():

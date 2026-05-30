@@ -96,6 +96,31 @@ def search_events(
 _FETCH_BATCH_SIZE = 100
 
 
+_DELETE_BATCH_SIZE = 1000
+
+
+def delete_vectors(ids: list[str]) -> int:
+    """Delete vectors by ID from Pinecone. Missing IDs are no-ops (idempotent).
+
+    Used by the daily cleanup job to evict vectors for past events. The Supabase
+    rows are kept; only the search-index vectors are removed. Returns the count
+    of IDs submitted for deletion. Pinecone's delete accepts up to 1000 IDs per
+    call, so we chunk to stay within that limit.
+    """
+    if not ids:
+        return 0
+    index = _get_index()
+    deleted = 0
+    for i in range(0, len(ids), _DELETE_BATCH_SIZE):
+        batch = ids[i : i + _DELETE_BATCH_SIZE]
+        try:
+            index.delete(ids=batch)
+            deleted += len(batch)
+        except Exception as e:
+            logger.error("delete_vectors batch %d-%d failed: %s", i, i + len(batch), e)
+    return deleted
+
+
 def fetch_vectors(ids: list[str]) -> dict[str, list[float]]:
     """Batch-fetch event vectors by ID. IDs not found in the index are silently omitted.
 
