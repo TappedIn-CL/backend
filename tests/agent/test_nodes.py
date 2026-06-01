@@ -264,3 +264,56 @@ async def test_score_and_rank_uses_taste_vector_when_present(mock_fetch):
     result = await score_and_rank(state)
     assert result["ranked_events"][0]["id"] == "evt-a"
     assert result["ranked_events"][1]["id"] == "evt-b"
+
+
+@pytest.mark.anyio
+@patch(
+    "agent.nodes.fetch_vectors",
+    return_value={
+        "evt-a": [1.0, 0.0] + [0.0] * 1534,
+        "evt-b": [0.0, 1.0] + [0.0] * 1534,
+    },
+)
+async def test_score_and_rank_populates_enriched_events_with_breakdown(mock_fetch):
+    result = await score_and_rank(_SCORE_BASE_STATE)
+    enriched = result["enriched_events"]
+    assert len(enriched) == 2
+    for event in enriched:
+        assert set(event["score_breakdown"]) == {
+            "query_sim",
+            "taste_sim",
+            "distance_penalty",
+            "final_score",
+        }
+        assert event["score"] == event["score_breakdown"]["final_score"]
+
+
+@pytest.mark.anyio
+@patch(
+    "agent.nodes.fetch_vectors",
+    return_value={
+        # Identical vectors → only the distance penalty can break the tie.
+        "evt-a": [1.0, 0.0] + [0.0] * 1534,
+        "evt-b": [1.0, 0.0] + [0.0] * 1534,
+    },
+)
+async def test_score_and_rank_threads_user_coords_into_distance(mock_fetch):
+    state = {
+        **_SCORE_BASE_STATE,
+        "query_vector": [1.0, 0.0] + [0.0] * 1534,
+        "taste_vector": None,
+        "candidate_events": [
+            {**_SCORE_BASE_STATE["candidate_events"][0], "id": "evt-a",
+             "latitude": 36.16, "longitude": -115.14},   # Las Vegas (far)
+            {**_SCORE_BASE_STATE["candidate_events"][1], "id": "evt-b",
+             "latitude": 34.05, "longitude": -118.24},   # Los Angeles (near)
+        ],
+        "user_lat": 34.05,
+        "user_lng": -118.24,
+    }
+    result = await score_and_rank(state)
+    # With identical semantic relevance, the nearer event must win once the node
+    # threads the user's coordinates into score_events.
+    assert result["enriched_events"][0]["id"] == "evt-b"
+    assert result["enriched_events"][0]["score_breakdown"]["distance_penalty"] == 0.0
+    assert result["enriched_events"][1]["score_breakdown"]["distance_penalty"] > 0.0

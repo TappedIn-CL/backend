@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from agent.graph import agent
+from agent.state import initial_state
 from agent.recommendations import recommend_for_you
 from auth.profile import get_user_profile_optional, get_user_profile_required
 from db.dependencies import get_db
@@ -28,19 +29,13 @@ async def agent_query(
         yield "event: phase\ndata: {\"phase\": \"parsing\"}\n\n"
 
         try:
-            async for event in agent.astream({
-                "query": payload.query,
-                "chips": payload.chips,
-                "user_profile": user_profile,
-                "semantic_query": "",
-                "filters": {},
-                "query_vector": None,
-                "candidate_events": [],
-                "hydrated_events": [],
-                "ranked_events": [],
-                "response": None,
-                "taste_vector": None,
-            }):
+            async for event in agent.astream(initial_state(
+                query=payload.query,
+                chips=payload.chips,
+                user_profile=user_profile,
+                user_lat=payload.user_lat,
+                user_lng=payload.user_lng,
+            )):
                 if "parse_intent" in event:
                     yield "event: phase\ndata: {\"phase\": \"retrieving\"}\n\n"
                 elif "retrieve_events" in event:
@@ -52,6 +47,7 @@ async def agent_query(
                     latency = int((time.time() - start_time) * 1000)
                     results = {
                         "events": state.get("ranked_events", []),
+                        "enriched_events": state.get("enriched_events", []),
                         "count": len(state.get("ranked_events", [])),
                         "latency_ms": latency,
                     }

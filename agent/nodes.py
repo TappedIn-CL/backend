@@ -60,6 +60,10 @@ Chip phrase mappings:
 - "thrifty" / "cheap" → price_max: 20
 - "free" → price_max: 0
 
+Also extract:
+- time_intent: The user's temporal intent — exactly one of "now", "today", "tonight", "this_weekend", "this_week", "upcoming", or null if no time is implied. Use "now" only when the user wants something happening right at this moment.
+- confidence: Your confidence from 0.0 to 1.0 that you correctly understood what the user is looking for. Use lower values for vague or ambiguous queries.
+
 Respond with valid JSON structure only, no additional text.
 """.format(
     categories=", ".join(CATEGORIES),
@@ -73,12 +77,36 @@ Example:
 Query: "chill outdoor jazz under $20 this weekend within 10 miles"
 {{
   "semantic_query": "chill outdoor jazz music event",
-  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"]}}
+  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"]}},
+  "time_intent": "this_weekend",
+  "confidence": 0.9
 }}
 
 """
 
 IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
+
+# Allowed temporal intents — mirrors agent.state.TimeIntent. Anything else from
+# the LLM is coerced to None so a hallucinated value never reaches downstream
+# time-window logic.
+VALID_TIME_INTENTS = {"now", "today", "tonight", "this_weekend", "this_week", "upcoming"}
+
+
+def _coerce_time_intent(value) -> str | None:
+    # isinstance guard first: a non-string (e.g. a list from malformed LLM JSON)
+    # would raise TypeError on `value in <set>` and is never a valid intent.
+    return value if isinstance(value, str) and value in VALID_TIME_INTENTS else None
+
+
+def _clamp_confidence(value) -> float | None:
+    """Clamp a self-reported confidence into [0, 1]; None when unparseable/absent."""
+    if value is None:
+        return None
+    try:
+        c = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(1.0, c))
 
 
 async def parse_intent(state: AgentState) -> AgentState:
@@ -113,6 +141,9 @@ async def parse_intent(state: AgentState) -> AgentState:
             "tags": filters.get("tags", []) or [],
         }
 
+        time_intent = _coerce_time_intent(result.get("time_intent"))
+        confidence = _clamp_confidence(result.get("confidence"))
+
     except Exception as e:
         logger.warning("parse_intent LLM call failed, falling back: %s", e)
         semantic_query = query
@@ -124,6 +155,10 @@ async def parse_intent(state: AgentState) -> AgentState:
             "vibes": [],
             "tags": [],
         }
+        time_intent = None
+        # 0.0 (not None) so the future clarify node treats a total parse failure
+        # as low-confidence and short-circuits to ask the user for clarification.
+        confidence = 0.0
 
     query_vector = await asyncio.to_thread(embed_query, semantic_query)
 
@@ -132,6 +167,9 @@ async def parse_intent(state: AgentState) -> AgentState:
         "semantic_query": semantic_query,
         "query_vector": query_vector,
         "filters": structured_filters,
+        "time_intent": time_intent,
+        "happening_now": time_intent == "now",
+        "confidence": confidence,
     }
 
 
@@ -304,6 +342,7 @@ async def score_and_rank(state: AgentState) -> AgentState:
         return {
             **state,
             "ranked_events": [],
+            "enriched_events": [],
             "response": f"No events found for '{state['query']}'.",
         }
 
@@ -315,12 +354,20 @@ async def score_and_rank(state: AgentState) -> AgentState:
     event_ids = [e["id"] for e in candidates]
     try:
         event_vectors = await asyncio.to_thread(fetch_vectors, event_ids)
-        ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
+        ranked = score_events(
+            query_vector,
+            taste_vector,
+            candidates,
+            event_vectors,
+            state.get("user_lat"),
+            state.get("user_lng"),
+        )
     except Exception as e:
         logger.error("Scoring failed, returning unranked candidates: %s", e)
         return {
             **state,
             "ranked_events": list(candidates),
+            "enriched_events": [],
             "response": f"Found {len(candidates)} events for '{state['query']}' (ranking unavailable).",
         }
 
@@ -332,4 +379,7 @@ async def score_and_rank(state: AgentState) -> AgentState:
     else:
         response = f"No scoreable events found for '{state['query']}'."
 
-    return {**state, "ranked_events": ranked, "response": response}
+    # ranked is already list[EnrichedEvent] (each carries score + score_breakdown).
+    # ranked_events keeps its existing consumers working (additive score_breakdown
+    # key); enriched_events is the typed view downstream owners build on.
+    return {**state, "ranked_events": ranked, "enriched_events": ranked, "response": response}
