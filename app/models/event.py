@@ -36,6 +36,7 @@ class Event(Base):
     vibe_tags = Column(String, nullable=True)
     source = Column(String, nullable=True)
     source_id = Column(String, nullable=True)
+    source_url = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
