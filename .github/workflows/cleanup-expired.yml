@@ -1,0 +1,33 @@
+name: Cleanup Expired Events
+
+on:
+  schedule:
+    - cron: '0 5 * * *'  # daily at 05:00 UTC
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run cleanup expired events
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
+          PYTHONUNBUFFERED: '1'
+        run: python scripts/cleanup_expired_events.py --yes
