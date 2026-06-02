@@ -31,5 +31,6 @@ jobs:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           PYTHONUNBUFFERED: "1"
         run: python scrapers/run_pipeline.py
