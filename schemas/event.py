@@ -2,7 +2,9 @@ from datetime import datetime
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+from app.utils.datetime_format import format_stored_event_datetime
 
 
 # Must stay in lock-step with agent/taxonomy.py CATEGORIES.
@@ -86,6 +88,10 @@ class EventResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("date")
+    def serialize_date(self, dt: datetime) -> str:
+        return format_stored_event_datetime(dt) or ""
 
     @field_validator("special_tags", "vibe_tags", mode="before")
     @classmethod
