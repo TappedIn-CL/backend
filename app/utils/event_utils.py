@@ -22,7 +22,6 @@ def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEvent
         vibe_tags=_split_csv(event.vibe_tags),
         venue_name=event.location,
         address=event.location,
-        website=event.website,
         city="Los Angeles",
         latitude=None,
         longitude=None,

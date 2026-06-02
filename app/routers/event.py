@@ -90,12 +90,12 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         date=payload.date,
         cost=payload.cost,
         location=payload.location,
-        website=payload.website,
         latitude=lat,
         longitude=lng,
         category=payload.category,
         special_tags=special_tags_str,
         vibe_tags=vibe_tags_str,
+        source_url=payload.source_url,
     )
     db.add(event)
     db.commit()
