@@ -33,6 +33,3 @@ class User(Base):
     occupation = Column(String, nullable=True)
     interests = Column(ARRAY(String), nullable=True)
 
-    # legacy array — prefer user_favorites junction table for new writes
-    favorite_events = Column(ARRAY(String), nullable=True)
-    going_to_events = Column(ARRAY(String), nullable=True)
