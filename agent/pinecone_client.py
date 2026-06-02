@@ -79,13 +79,20 @@ def upsert_events(events: list[EventSchema]) -> int:
     return total
 
 
+def upcoming_only_filter(extra: dict | None = None) -> dict:
+    """Restrict Pinecone queries to events that have not started yet."""
+    f: dict = {"start_time_unix": {"$gte": int(time.time())}}
+    if extra:
+        f.update(extra)
+    return f
+
+
 def search_events(
     vector: list[float], filters: dict, top_k: int = 20
 ) -> list[dict]:
     index = _get_index()
     kwargs: dict = {"vector": vector, "top_k": top_k, "include_metadata": True}
-    if filters:
-        kwargs["filter"] = filters
+    kwargs["filter"] = upcoming_only_filter(filters or None)
     response = index.query(**kwargs)
     return [
         {"id": m["id"], "score": m["score"], "metadata": m["metadata"]}

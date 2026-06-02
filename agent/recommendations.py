@@ -132,7 +132,13 @@ def _hydrate_from_db(db: Session, event_ids: list[str]) -> list[EventSchema]:
         return []
 
     uuid_list = [p[1] for p in parsed]
-    rows = db.query(Event).filter(Event.id.in_(uuid_list)).all()
+    rows = (
+        db.query(Event)
+        .filter(Event.id.in_(uuid_list))
+        .filter(Event.is_active == True)  # noqa: E712
+        .filter(Event.date >= datetime.utcnow())
+        .all()
+    )
     by_id = {e.id: e for e in rows}
 
     out: list[EventSchema] = []

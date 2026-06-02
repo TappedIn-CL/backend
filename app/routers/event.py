@@ -96,6 +96,7 @@ def create_event(payload: EventCreate, db: Annotated[Session, Depends(get_db)]) 
         category=payload.category,
         special_tags=special_tags_str,
         vibe_tags=vibe_tags_str,
+        source_url=payload.source_url,
     )
     db.add(event)
     db.commit()
