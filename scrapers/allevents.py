@@ -298,6 +298,7 @@ def save_events_to_db(events):
                 "source": "allevents",
                 "source_id": source_id,
                 "is_active": is_event_active(event_date),
+                "source_url": event_data.get("source_url"),
             }
 
             values, skip_reason = enforce_coordinates_for_ingestion(values)
