@@ -1,6 +1,7 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models.event import Event
+from app.utils.datetime_format import format_stored_event_datetime
 from schemas.event import HydratedEventResponse
 
 
@@ -27,7 +28,7 @@ def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEvent
         longitude=None,
         price_min=event.cost,
         price_max=event.cost,
-        start_time=event.date.isoformat() if event.date else None,
+        start_time=format_stored_event_datetime(event.date),
         end_time=None,
         image_url=None,
         source_url=event.source_url,
