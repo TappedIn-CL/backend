@@ -35,6 +35,7 @@ async def agent_query(
                 user_profile=user_profile,
                 user_lat=payload.user_lat,
                 user_lng=payload.user_lng,
+                happening_now=payload.happening_now,
             )):
                 if "parse_intent" in event:
                     yield "event: phase\ndata: {\"phase\": \"retrieving\"}\n\n"

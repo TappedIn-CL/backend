@@ -2,6 +2,9 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import httpx
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -20,6 +23,12 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 HYDRATION_TIMEOUT_SECONDS = 5.0
 MAX_HYDRATION_BATCH = 100
+
+# Time filter config — matches scrapers/run_cleanup.GRACE_HOURS and
+# app/utils/event_utils.DEFAULT_EVENT_DURATION_HOURS so an event's "is over"
+# determination is identical at scrape time, cleanup time, and query time.
+DEFAULT_EVENT_DURATION_HOURS = 3
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # Reuse OpenAI client pattern from embedding.py
 _chat_client: AsyncOpenAI | None = None
@@ -168,7 +177,10 @@ async def parse_intent(state: AgentState) -> AgentState:
         "query_vector": query_vector,
         "filters": structured_filters,
         "time_intent": time_intent,
-        "happening_now": time_intent == "now",
+        # Explicit toggle from the Happening Now button wins. The LLM-inferred
+        # time_intent == "now" can still flip it ON for queries like "music
+        # right now" without the toggle, but never OFF if the user toggled it.
+        "happening_now": bool(state.get("happening_now")) or (time_intent == "now"),
         "confidence": confidence,
     }
 
@@ -254,6 +266,46 @@ async def retrieve_events(state: AgentState) -> AgentState:
     }
 
 
+def _passes_time_filter(event: EventSchema, now_la: datetime, happening_now: bool) -> bool:
+    """Drop events that have already ended; when happening_now is True, also drop
+    events that haven't started yet.
+
+    Uses the hydrated event's `end_time` when present (populated by Allen's
+    effective_end_time helper in event_to_hydrated). Falls back to
+    start + DEFAULT_EVENT_DURATION_HOURS when end_time is None/empty so this
+    works against legacy rows whose end_time column is still NULL.
+
+    Datetimes are compared as naive LA-local, matching Supabase's storage
+    convention. Bad/missing start_time → drop (can't reason about timing).
+    """
+    start_str = event.get("start_time")
+    if not start_str:
+        return False
+    try:
+        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        if start.tzinfo is not None:
+            start = start.astimezone(LOCAL_TZ).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return False
+
+    end_str = event.get("end_time")
+    end: datetime | None = None
+    if end_str:
+        try:
+            end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            if end.tzinfo is not None:
+                end = end.astimezone(LOCAL_TZ).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            end = None
+    if end is None:
+        end = start + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
+
+    if happening_now:
+        return start <= now_la <= end
+    # Default: just hide events that are over.
+    return end >= now_la
+
+
 async def hydrate_events(state: AgentState) -> AgentState:
     """
     Node 3: Fetches full Supabase event rows for the Pinecone candidates and
@@ -322,6 +374,21 @@ async def hydrate_events(state: AgentState) -> AgentState:
     except Exception as e:
         logger.error("Hydration failed, returning sparse candidates: %s", e)
         hydrated = list(candidates)
+
+    # Always drop events that have already ended; when the Happening Now toggle
+    # is on, ALSO drop events that haven't started yet. This runs unconditionally
+    # because past events polluting default search results was the user-facing
+    # bug — Happening Now is a stricter version of the same filter.
+    now_la = datetime.now(LOCAL_TZ).replace(tzinfo=None)
+    happening_now = bool(state.get("happening_now"))
+    before = len(hydrated)
+    hydrated = [e for e in hydrated if _passes_time_filter(e, now_la, happening_now)]
+    dropped = before - len(hydrated)
+    if dropped:
+        logger.info(
+            "hydrate_events: time filter dropped %d/%d events (happening_now=%s)",
+            dropped, before, happening_now,
+        )
 
     return {**state, "hydrated_events": hydrated}
 
