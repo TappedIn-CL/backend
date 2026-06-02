@@ -4,8 +4,9 @@ Usage:
   - Dry-run (default): python scripts/cleanup_expired_events.py
   - Non-interactive: python scripts/cleanup_expired_events.py --yes
 
-The script is intentionally conservative: it flips `is_active` in the DB
-first (authoritative), then deletes vectors from Pinecone in batches.
+DB: sets is_active=False for past events still marked active.
+Pinecone: deletes vectors for ALL past events (active or already inactive),
+          so expired events are not returned by semantic search.
 """
 import os
 import sys
@@ -29,13 +30,26 @@ def chunked(iterable, size):
         yield iterable[i : i + size]
 
 
-def find_expired_event_ids(db, cutoff_dt=None):
-    # If no cutoff provided, use DB-side now() to avoid timezone drift between
-    # app and DB. If cutoff_dt is provided (ISO string parsed), compare against it.
+def _past_event_query(db, cutoff_dt, *, active_only: bool):
+    q = db.query(Event.id)
     if cutoff_dt is None:
-        rows = db.query(Event.id).filter(Event.date < func.now(), Event.is_active == True).all()
+        q = q.filter(Event.date < func.now())
     else:
-        rows = db.query(Event.id).filter(Event.date < cutoff_dt, Event.is_active == True).all()
+        q = q.filter(Event.date < cutoff_dt)
+    if active_only:
+        q = q.filter(Event.is_active == True)  # noqa: E712
+    return q
+
+
+def find_past_active_event_ids(db, cutoff_dt=None):
+    """Past events still marked active — candidates for is_active=False."""
+    rows = _past_event_query(db, cutoff_dt, active_only=True).all()
+    return [str(r.id) for r in rows]
+
+
+def find_all_past_event_ids(db, cutoff_dt=None):
+    """All past events — candidates for Pinecone vector deletion."""
+    rows = _past_event_query(db, cutoff_dt, active_only=False).all()
     return [str(r.id) for r in rows]
 
 
@@ -50,7 +64,6 @@ def mark_inactive(db, ids):
 def delete_pinecone_vectors(index, ids):
     deleted = 0
     for batch in chunked(ids, 100):
-        # simple retry logic per batch
         for attempt in range(4):
             try:
                 index.delete(ids=batch)
@@ -65,27 +78,40 @@ def delete_pinecone_vectors(index, ids):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Cleanup expired events: mark is_active=False and delete Pinecone vectors.")
+    parser = argparse.ArgumentParser(
+        description="Cleanup expired events: mark is_active=False and delete Pinecone vectors."
+    )
     parser.add_argument("--yes", action="store_true", help="Perform changes (otherwise dry-run)")
-    parser.add_argument("--cutoff-iso", type=str, default=None, help="Optional ISO cutoff datetime. If omitted, DB now() is used.")
+    parser.add_argument(
+        "--cutoff-iso",
+        type=str,
+        default=None,
+        help="Optional ISO cutoff datetime. If omitted, DB now() is used.",
+    )
     args = parser.parse_args()
 
     cutoff = None
     if args.cutoff_iso:
-        # parse ISO; treat naive datetimes as UTC
         parsed = datetime.fromisoformat(args.cutoff_iso)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         cutoff = parsed
 
+    cutoff_label = cutoff.isoformat() if cutoff is not None else "DB now()"
+
     print("Connecting to DB...")
     db = SessionLocal()
     try:
-        ids = find_expired_event_ids(db, cutoff)
-        print(f"Found {len(ids)} expired active events (cutoff={cutoff.isoformat()})")
-        if ids:
-            print("Sample IDs:", ids[:5])
-        else:
+        to_deactivate = find_past_active_event_ids(db, cutoff)
+        to_delete_pc = find_all_past_event_ids(db, cutoff)
+
+        print(f"Past events (cutoff={cutoff_label}):")
+        print(f"  {len(to_deactivate)} still active in DB → will set is_active=False")
+        print(f"  {len(to_delete_pc)} total past in DB → will delete Pinecone vectors")
+        if to_delete_pc:
+            print("Sample Pinecone delete IDs:", to_delete_pc[:5])
+
+        if not to_deactivate and not to_delete_pc:
             print("Nothing to do.")
             return
 
@@ -93,17 +119,18 @@ def main():
             print("Dry-run mode. No changes made. Re-run with --yes to apply.")
             return
 
-        print("Marking events inactive in DB...")
-        updated = mark_inactive(db, ids)
-        print(f"  Marked {updated} events inactive in DB.")
+        if to_deactivate:
+            print("Marking newly expired events inactive in DB...")
+            updated = mark_inactive(db, to_deactivate)
+            print(f"  Marked {updated} events inactive in DB.")
     finally:
         db.close()
 
-    # Delete Pinecone vectors
-    print("Deleting Pinecone vectors...")
-    idx = _get_index()
-    deleted = delete_pinecone_vectors(idx, ids)
-    print(f"  Deleted {deleted} Pinecone vectors.")
+    if to_delete_pc:
+        print("Deleting Pinecone vectors for all past events...")
+        idx = _get_index()
+        deleted = delete_pinecone_vectors(idx, to_delete_pc)
+        print(f"  Deleted {deleted} Pinecone vectors.")
     print("Done.")
 
 
