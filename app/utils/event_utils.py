@@ -39,9 +39,8 @@ def is_event_active(event_date: datetime, today: date | None = None) -> bool:
     return event_date.date() >= (today or date.today())
 
 
-def event_to_hydrated(event: Event) -> HydratedEventResponse:
-    # latitude/longitude/end_time/image_url/source_url are demo placeholders —
-    # the Event model doesn't store them yet. The frontend tolerates None.
+def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEventResponse:
+    # latitude/longitude/end_time/image_url are not yet stored on the Event model.
     # venue_name and address both map from `location` for the demo.
     return HydratedEventResponse(
         id=event.id,
@@ -60,7 +59,8 @@ def event_to_hydrated(event: Event) -> HydratedEventResponse:
         start_time=event.date.isoformat() if event.date else None,
         end_time=None,
         image_url=None,
-        source_url=None,
+        source_url=event.source_url,
+        score=score,
     )
 
 

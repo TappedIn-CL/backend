@@ -15,6 +15,7 @@ def get_bearer_token(
     ],
 ) -> str:
     if credentials is None or credentials.scheme.lower() != "bearer":
+        logger.warning("401: No Bearer token in request")
         raise HTTPException(
             status_code=401,
             detail="Not authenticated",

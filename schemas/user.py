@@ -28,6 +28,29 @@ class UserCreate(BaseModel):
     occupation: str | None = None
     interests: list[str] | None = None
 
+class UserUpdate(BaseModel):
+    username: str | None = None
+    full_name: str | None = None
+    phone_number: str | None = None
+    avatar_url: str | None = None
+
+    vibes: list[str] | None = None
+    search_radius: int | None = None
+    price_range: str | None = None
+    preferred_days: list[str] | None = None
+    email_notifs: bool | None = None
+    push_notifs: bool | None = None
+    sms_notifs: bool | None = None
+
+    date_of_birth: date | None = None
+    pronouns: str | None = None
+    gender: str | None = None
+    neighborhood: str | None = None
+    occupation: str | None = None
+    interests: list[str] | None = None
+    going_to_events: list[str] | None = None
+
+
 class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
@@ -68,3 +91,29 @@ class FavoriteResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GoingToCreate(BaseModel):
+    event_id: UUID
+
+
+class GoingToResponse(BaseModel):
+    event_id: UUID
+    created_at: datetime
+    google_event_id: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CalendarSync(BaseModel):
+    ok: bool
+    reason: str | None = None
+
+
+class GoingToPostResponse(BaseModel):
+    going_to: GoingToResponse
+    calendar_sync: CalendarSync
+
+
+class GoingToDeleteResponse(BaseModel):
+    calendar_sync: CalendarSync
