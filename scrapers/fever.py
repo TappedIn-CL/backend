@@ -333,6 +333,7 @@ def save_events_to_db(events):
                 "vibe_tags": event_data.get("vibe_tags"),
                 "source": "fever",
                 "source_id": source_id,
+                "source_url": event_data.get("source_url"),
             }
 
             if existing:

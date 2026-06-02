@@ -68,12 +68,17 @@ def initial_state(
     user_profile: Optional[dict],
     user_lat: Optional[float],
     user_lng: Optional[float],
+    happening_now: bool = False,
 ) -> AgentState:
     """Build the seed AgentState for a fresh agent run.
 
     Single source of truth for the initial state so every entrypoint stays in
     sync with AgentState (guarded by test_initial_state_keys_match_agentstate_contract).
     Nodes fill in the remaining fields as the graph executes.
+
+    `happening_now` is the explicit toggle from the Happening Now button. Pass
+    False when the caller has no signal — parse_intent may still flip it true
+    via LLM-inferred time_intent == "now".
     """
     return {
         "query": query,
@@ -90,7 +95,7 @@ def initial_state(
         "user_lat": user_lat,
         "user_lng": user_lng,
         "time_intent": None,
-        "happening_now": False,
+        "happening_now": happening_now,
         "confidence": None,
         "enriched_events": [],
     }

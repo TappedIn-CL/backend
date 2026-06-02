@@ -25,9 +25,10 @@ def effective_end_time(event: Event) -> datetime | None:
     return None
 
 
-def event_to_hydrated(event: Event) -> HydratedEventResponse:
-    # latitude/longitude/image_url/source_url are demo placeholders —
-    # the Event model doesn't store them yet. The frontend tolerates None.
+def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEventResponse:
+    # latitude/longitude/image_url are demo placeholders — the Event model
+    # doesn't store them yet. The frontend tolerates None.
+    # end_time defaults to start + 3h via effective_end_time when not stored.
     # venue_name and address both map from `location` for the demo.
     end_time = effective_end_time(event)
     return HydratedEventResponse(
@@ -47,7 +48,8 @@ def event_to_hydrated(event: Event) -> HydratedEventResponse:
         start_time=event.date.isoformat() if event.date else None,
         end_time=end_time.isoformat() if end_time else None,
         image_url=None,
-        source_url=None,
+        source_url=event.source_url,
+        score=score,
     )
 
 
