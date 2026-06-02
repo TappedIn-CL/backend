@@ -1,5 +1,12 @@
+import time
 from unittest.mock import patch, MagicMock
-from agent.pinecone_client import _build_record, upsert_events, search_events, fetch_vectors
+from agent.pinecone_client import (
+    _build_record,
+    upsert_events,
+    search_events,
+    fetch_vectors,
+    upcoming_only_filter,
+)
 
 MOCK_EVENT = {
     "id": "evt-001",
@@ -89,23 +96,24 @@ def test_search_events_returns_matches(mock_get_index):
 
 
 @patch("agent.pinecone_client._get_index")
-def test_search_events_empty_filters_omits_filter_arg(mock_get_index):
+def test_search_events_always_applies_upcoming_filter(mock_get_index):
     mock_index = MagicMock()
     mock_index.query.return_value = {"matches": []}
     mock_get_index.return_value = mock_index
     search_events([0.1] * 1536, {}, top_k=5)
     call_kwargs = mock_index.query.call_args[1]
-    assert "filter" not in call_kwargs
+    assert call_kwargs["filter"] == upcoming_only_filter()
 
 
 @patch("agent.pinecone_client._get_index")
-def test_search_events_non_empty_filters_passes_filter_kwarg(mock_get_index):
+def test_search_events_merges_user_filters_with_upcoming(mock_get_index):
     mock_index = MagicMock()
     mock_index.query.return_value = {"matches": []}
     mock_get_index.return_value = mock_index
     search_events([0.1] * 1536, {"city": "Los Angeles"}, top_k=5)
     call_kwargs = mock_index.query.call_args[1]
-    assert call_kwargs["filter"] == {"city": "Los Angeles"}
+    assert call_kwargs["filter"]["city"] == "Los Angeles"
+    assert call_kwargs["filter"]["start_time_unix"]["$gte"] <= int(time.time())
 
 
 @patch("agent.pinecone_client.time.sleep")
