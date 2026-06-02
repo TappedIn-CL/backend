@@ -62,6 +62,7 @@ class EventCreate(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    source_url: str | None = None
     is_active: bool = True
 
 
@@ -80,6 +81,7 @@ class EventResponse(BaseModel):
     vibe_tags: list[VibeTag] | None = None
     source: str | None = None
     source_id: str | None = None
+    source_url: str | None = None
     is_active: bool
     created_at: datetime
 
