@@ -91,3 +91,29 @@ class FavoriteResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GoingToCreate(BaseModel):
+    event_id: UUID
+
+
+class GoingToResponse(BaseModel):
+    event_id: UUID
+    created_at: datetime
+    google_event_id: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CalendarSync(BaseModel):
+    ok: bool
+    reason: str | None = None
+
+
+class GoingToPostResponse(BaseModel):
+    going_to: GoingToResponse
+    calendar_sync: CalendarSync
+
+
+class GoingToDeleteResponse(BaseModel):
+    calendar_sync: CalendarSync
