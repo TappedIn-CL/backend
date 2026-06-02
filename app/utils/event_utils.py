@@ -13,25 +13,23 @@ def _split_csv(value: str | None) -> list[str]:
 
 
 def enforce_coordinates_for_ingestion(values: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """Ensure an event payload has geocoded coordinates before DB write.
+    """Best-effort geocode coordinates before DB write.
 
-    Returns (values, None) when coordinates are present/resolved.
-    Returns (None, reason) when the row should be skipped.
+    If coordinates can be resolved, they are written into `values`.
+    If geocoding fails or no location is available, the row still passes
+    through with whatever coordinates were already provided, leaving latitude
+    and longitude as null when they cannot be determined.
     """
     location = values.get("location")
-    if not location:
-        return None, "missing location"
-
     lat = values.get("latitude")
     lng = values.get("longitude")
-    if lat is None or lng is None:
+
+    if (lat is None or lng is None) and location:
         lat, lng = geocode_address(location)
 
-    if lat is None or lng is None:
-        return None, "geocode failed"
-
-    values["latitude"] = lat
-    values["longitude"] = lng
+    if lat is not None and lng is not None:
+        values["latitude"] = lat
+        values["longitude"] = lng
     return values, None
 
 
