@@ -224,8 +224,7 @@ def list_favorites(
 def _try_calendar_insert(user_id: str, db: Session, event: Event) -> tuple[str | None, CalendarSync]:
     if event.date is None:
         return None, CalendarSync(ok=False, reason="missing_time")
-    # TODO(jason): re-enable past-event skip before merging
-    if False and event.date < datetime.utcnow():
+    if event.date < datetime.utcnow():
         return None, CalendarSync(ok=False, reason="past_event")
     try:
         gcal_id = google_calendar.insert_event(user_id, db, event)
@@ -270,16 +269,25 @@ def add_going_to(
         db.commit()
         db.refresh(row)
 
-    logger.info(
-        "add_going_to: user=%s event=%s existing_gcal_id=%r event.date=%r",
-        user_id, payload.event_id, row.google_event_id, event.date,
+    # Auto-favorite on RSVP (W6 spec). Idempotent: if the user already
+    # favorited this event, do nothing. Uses the user_favorites junction
+    # table — the canonical store on main, not the legacy array column.
+    existing_fav = (
+        db.query(UserFavorite)
+        .filter(
+            UserFavorite.user_id == user_id,
+            UserFavorite.event_id == payload.event_id,
+        )
+        .first()
     )
+    if existing_fav is None:
+        db.add(UserFavorite(user_id=user_id, event_id=payload.event_id))
+        db.commit()
+
     if row.google_event_id:
         sync = CalendarSync(ok=True)
-        logger.info("add_going_to: skipping insert, row already has google_event_id=%s", row.google_event_id)
     else:
         gcal_id, sync = _try_calendar_insert(user_id, db, event)
-        logger.info("add_going_to: _try_calendar_insert returned gcal_id=%r sync=%r", gcal_id, sync)
         if gcal_id is not None:
             row.google_event_id = gcal_id
             db.commit()
