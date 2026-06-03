@@ -12,7 +12,6 @@ def _split_csv(value: str | None) -> list[str]:
 
 
 def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEventResponse:
-    # latitude/longitude/end_time/image_url are not yet stored on the Event model.
     # venue_name and address both map from `location` for the demo.
     return HydratedEventResponse(
         id=event.id,
@@ -24,8 +23,8 @@ def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEvent
         venue_name=event.location,
         address=event.location,
         city="Los Angeles",
-        latitude=None,
-        longitude=None,
+        latitude=event.latitude,
+        longitude=event.longitude,
         price_min=event.cost,
         price_max=event.cost,
         start_time=format_stored_event_datetime(event.date),
