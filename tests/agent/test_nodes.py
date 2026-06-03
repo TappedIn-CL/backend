@@ -104,53 +104,57 @@ async def test_retrieve_events_empty_pinecone_returns_empty_candidates(mock_embe
 @patch("agent.nodes.embed_query", return_value=[0.2] * 1536)
 async def test_retrieve_events_passes_filters_to_search(mock_embed, mock_search):
     # parse_intent emits raw values; retrieve_events translates them into Pinecone's
-    # MongoDB-style filter operators before calling search_events.
+    # MongoDB-style filter operators before calling search_events. A budget ceiling
+    # of price_max=0 means "free", which maps to price_max == 0 (not $lte).
     state_with_filters = {
         **BASE_STATE,
         "filters": {"price_max": 0, "categories": ["Music"], "tags": ["outdoor"]},
     }
     await retrieve_events(state_with_filters)
-    mock_search.assert_called_once_with(
-        [0.2] * 1536,
-        {
-            "price_max": {"$lte": 0},
-            "category": {"$in": ["Music"]},
-            "tags": {"$in": ["outdoor"]},
-        },
-        top_k=20,
-    )
+    # search_events(vector, filter, over_fetch) — over-fetch passed positionally.
+    vector_arg, filter_arg, *_ = mock_search.call_args.args
+    assert vector_arg == [0.2] * 1536
+    assert filter_arg == {
+        "price_max": {"$eq": 0},
+        "category": {"$in": ["Music"]},
+        "tags": {"$in": ["outdoor"]},
+    }
 
 
 @pytest.mark.anyio
-@patch("db.session.SessionLocal")
-async def test_hydrate_events_calls_db_and_merges(mock_session_cls):
-    from unittest.mock import MagicMock
+async def test_hydrate_events_calls_backend_and_merges():
+    # hydrate_events fetches full rows from the backend over httpx
+    # (GET /events/by-ids) and merges them onto the sparse Pinecone candidates.
     import uuid
 
     test_id = str(uuid.uuid4())
 
-    mock_event = MagicMock()
-    mock_event.id = uuid.UUID(test_id)
-    mock_event.title = "DB Title"
-    mock_event.description = "Real description"
-    mock_event.category = "Music"
-    mock_event.special_tags = "outdoor"
-    mock_event.vibe_tags = "chill"
-    mock_event.location = "Test Venue"
-    mock_event.cost = 10.0
-    mock_event.date = None
+    class _Resp:
+        def raise_for_status(self):
+            pass
 
-    mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.all.return_value = [mock_event]
-    mock_session_cls.return_value = mock_db
+        def json(self):
+            return [{"id": test_id, "title": "DB Title", "description": "Real description"}]
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, params=None):
+            return _Resp()
 
     state = {
         "candidate_events": [
-            {"id": test_id, "title": "Sparse Title"}
+            {"id": test_id, "title": "Sparse Title", "latitude": 1.0, "longitude": 2.0}
         ]
     }
 
-    result = await hydrate_events(state)
+    with patch("agent.nodes.httpx.AsyncClient", lambda *a, **k: _Client()):
+        result = await hydrate_events(state)
+
     assert len(result["hydrated_events"]) == 1
     assert result["hydrated_events"][0]["description"] == "Real description"
     assert result["hydrated_events"][0]["title"] == "DB Title"

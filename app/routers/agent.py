@@ -35,6 +35,7 @@ async def agent_query(
                 "user_profile": user_profile,
                 "semantic_query": "",
                 "filters": {},
+                "ui_filters": payload.ui_filters.model_dump() if payload.ui_filters else None,
                 "query_vector": None,
                 "candidate_events": [],
                 "hydrated_events": [],
