@@ -3,9 +3,11 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import json
+import hashlib
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+from urllib.parse import urlparse
 
 from db.session import SessionLocal
 from app.models.event import Event
@@ -17,6 +19,12 @@ headers = {
 }
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def source_id_from_url(url: str) -> str:
+    path = urlparse(url).path.rstrip("/")
+    event_slug = path.rsplit("/", 1)[-1]
+    return event_slug if event_slug else hashlib.md5(path.encode()).hexdigest()
 
 
 def get_events_from_page(city_slug="ca--los-angeles", page=1):
@@ -94,7 +102,13 @@ def save_events_to_db(events):
                 continue
 
             exists = db.query(Event).filter(Event.title == e["title"]).first()
+            source_url = e.get("url")
             if exists:
+                if source_url and not exists.source_url:
+                    exists.source_url = source_url
+                    exists.source = exists.source or "eventbrite"
+                    if not exists.source_id:
+                        exists.source_id = source_id_from_url(source_url)
                 print(f"    ✗ duplicate: {e['title']}")
                 continue
 
@@ -122,6 +136,9 @@ def save_events_to_db(events):
                 latitude=lat,
                 longitude=lng,
                 category=e.get("category"),
+                source="eventbrite",
+                source_id=source_id_from_url(source_url) if source_url else None,
+                source_url=source_url,
             )
             db.add(event)
             print(f"    ✓ saving: {e['title']}")
