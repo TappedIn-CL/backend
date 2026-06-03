@@ -1,12 +1,12 @@
-"""Tests for agent/popular.py::popular_events and helpers."""
+"""Tests for app/services/popular.py::popular_events and helpers."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from agent import popular as pop
-from agent.popular import popular_events
+from app.services import popular as pop
+from app.services.popular import popular_events
 
 
 def _hydrated_obj(id_str: str, title: str = "T") -> SimpleNamespace:

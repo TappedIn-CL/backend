@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from agent.graph import agent
-from agent.popular import popular_events
+from app.services.popular import popular_events
 from agent.recommendations import recommend_for_you
 from auth.profile import get_user_profile_optional, get_user_profile_required
 from db.dependencies import get_db
