@@ -26,6 +26,7 @@ class AgentState(TypedDict):
     chips: list[str]                    # selected mood chips from frontend (e.g. ["Chill", "Foodie"])
     semantic_query: str                 # cleaned + chip-enriched text for embedding
     filters: dict[str, Any]            # extracted structured filters (price, date, distance, categories — NO vibes)
+    ui_filters: Optional[dict]         # raw FilterModal selections; override LLM-parsed filters in retrieve_events
     query_vector: Optional[list[float]] # embedded semantic_query
     candidate_events: list[EventSchema] # top-K results from Pinecone (sparse metadata)
     hydrated_events: list[EventSchema]  # candidate_events + full Supabase rows

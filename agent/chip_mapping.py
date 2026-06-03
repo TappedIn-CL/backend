@@ -35,6 +35,7 @@ CHIPS: list[str] = [
     "Music",
     "Date Night",
     "With Friends",
+    "Cozy",
     "Wellness",
     "Sports",
 ]
@@ -90,6 +91,11 @@ CHIP_MAPPING: dict[str, ChipMapping] = {
         "categories": [],
         "vibe_tags": ["social"],
         "semantic_phrase": "with friends group hangout social",
+    },
+    "Cozy": {
+        "categories": [],
+        "vibe_tags": ["intimate", "chill"],
+        "semantic_phrase": "cozy warm intimate relaxed",
     },
     "Wellness": {
         "categories": ["Wellness"],

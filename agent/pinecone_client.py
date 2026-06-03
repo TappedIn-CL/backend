@@ -80,10 +80,20 @@ def upsert_events(events: list[EventSchema]) -> int:
 
 
 def upcoming_only_filter(extra: dict | None = None) -> dict:
-    """Restrict Pinecone queries to events that have not started yet."""
-    f: dict = {"start_time_unix": {"$gte": int(time.time())}}
-    if extra:
-        f.update(extra)
+    """Restrict Pinecone queries to events that have not started yet.
+
+    Merges any caller-supplied start_time_unix range (e.g. a UI date filter)
+    with the upcoming-only floor instead of letting one clobber the other:
+    the lower bound becomes max(now, date_from) so a past date_from can't
+    surface events that already started, and a date_to $lte is preserved.
+    """
+    now = int(time.time())
+    f: dict = dict(extra) if extra else {}
+    existing = f.get("start_time_unix") or {}
+    merged: dict = {"$gte": max(now, existing.get("$gte", now))}
+    if "$lte" in existing:
+        merged["$lte"] = existing["$lte"]
+    f["start_time_unix"] = merged
     return f
 
 
