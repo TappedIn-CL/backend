@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from agent.graph import agent
+from app.services.popular import popular_events
 from agent.recommendations import recommend_for_you
 from auth.profile import get_user_profile_optional, get_user_profile_required
 from db.dependencies import get_db
@@ -80,6 +81,26 @@ async def for_you(
     """
     start_time = time.time()
     events = await recommend_for_you(user_profile, db, limit=limit)
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {
+        "events": events,
+        "count": len(events),
+        "latency_ms": latency_ms,
+    }
+
+
+@router.get("/popular")
+async def popular(
+    user_profile: Annotated[dict, Depends(get_user_profile_required)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Upcoming events ranked by global save count (user_favorites).
+
+    Falls back to soonest upcoming events when no saves exist yet.
+    """
+    start_time = time.time()
+    events = await popular_events(db, limit=limit)
     latency_ms = int((time.time() - start_time) * 1000)
     return {
         "events": events,
