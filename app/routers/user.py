@@ -378,6 +378,23 @@ def get_friend_requests(
     return [_public_user_dict(r) for r in requesters]
 
 
+@router.get("/me/friends/sent")
+def get_sent_friend_requests(
+    payload: Annotated[dict, Depends(get_jwt_payload)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    user_id = uuid.UUID(payload.get("sub"))
+    rows = db.query(Friendship).filter(
+        Friendship.requester_id == user_id,
+        Friendship.status == "pending",
+    ).all()
+    addressee_ids = [row.addressee_id for row in rows]
+    if not addressee_ids:
+        return []
+    addressees = db.query(User).filter(User.id.in_(addressee_ids)).all()
+    return [_public_user_dict(u) for u in addressees]
+
+
 @router.post("/me/friends/request")
 def send_friend_request(
     user_id: Annotated[str, Query()],
