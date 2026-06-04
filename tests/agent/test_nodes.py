@@ -117,43 +117,64 @@ async def test_retrieve_events_passes_filters_to_search(mock_embed, mock_search)
             "category": {"$in": ["Music"]},
             "tags": {"$in": ["outdoor"]},
         },
-        top_k=20,
+        40,            # default-path top_k (60 in happening_now mode)
+        "upcoming",    # time_mode — happening_now flag is False in BASE_STATE
     )
 
 
 @pytest.mark.anyio
-@patch("db.session.SessionLocal")
-async def test_hydrate_events_calls_db_and_merges(mock_session_cls):
-    from unittest.mock import MagicMock
+async def test_hydrate_events_calls_db_and_merges():
+    from unittest.mock import MagicMock, AsyncMock
+    from datetime import datetime, timedelta
     import uuid
 
     test_id = str(uuid.uuid4())
+    # Future start_time so the unconditional time filter in hydrate_events
+    # accepts the merged row (otherwise events with no start_time are dropped).
+    future = (datetime.now() + timedelta(hours=2)).isoformat()
+    full_row = {
+        "id": test_id,
+        "title": "DB Title",
+        "description": "Real description",
+        "category": "Music",
+        "tags": ["outdoor"],
+        "vibe_tags": ["chill"],
+        "venue_name": "Test Venue",
+        "address": "Test Venue",
+        "city": "Los Angeles",
+        "latitude": None,
+        "longitude": None,
+        "price_min": 10.0,
+        "price_max": 10.0,
+        "start_time": future,
+        "end_time": None,  # falls back to start + 3h via _passes_time_filter
+        "image_url": None,
+        "source_url": "",
+    }
 
-    mock_event = MagicMock()
-    mock_event.id = uuid.UUID(test_id)
-    mock_event.title = "DB Title"
-    mock_event.description = "Real description"
-    mock_event.category = "Music"
-    mock_event.special_tags = "outdoor"
-    mock_event.vibe_tags = "chill"
-    mock_event.location = "Test Venue"
-    mock_event.cost = 10.0
-    mock_event.date = None
-
-    mock_db = MagicMock()
-    mock_db.query.return_value.filter.return_value.all.return_value = [mock_event]
-    mock_session_cls.return_value = mock_db
+    # hydrate_events calls GET /events/by-ids via httpx; patch the AsyncClient.
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value=[full_row])
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
 
     state = {
         "candidate_events": [
-            {"id": test_id, "title": "Sparse Title"}
+            {"id": test_id, "title": "Sparse Title", "latitude": 34.05, "longitude": -118.25}
         ]
     }
 
-    result = await hydrate_events(state)
+    with patch("agent.nodes.httpx.AsyncClient", return_value=mock_client):
+        result = await hydrate_events(state)
+
     assert len(result["hydrated_events"]) == 1
     assert result["hydrated_events"][0]["description"] == "Real description"
     assert result["hydrated_events"][0]["title"] == "DB Title"
+    # lat/lng from the candidate (Pinecone metadata) survive when Supabase returns None.
+    assert result["hydrated_events"][0]["latitude"] == 34.05
 
 
 _SCORE_BASE_STATE = {
@@ -161,7 +182,7 @@ _SCORE_BASE_STATE = {
     "semantic_query": "chill outdoor event",
     "filters": {},
     "query_vector": [1.0, 0.0] + [0.0] * 1534,
-    "candidate_events": [
+    "hydrated_events": [
         {
             "id": "evt-a",
             "title": "Top Pick",
@@ -226,7 +247,7 @@ async def test_score_and_rank_orders_by_cosine_not_price(mock_fetch):
 @pytest.mark.anyio
 @patch("agent.nodes.fetch_vectors", return_value={})
 async def test_score_and_rank_empty_candidates_returns_empty(mock_fetch):
-    result = await score_and_rank({**_SCORE_BASE_STATE, "candidate_events": []})
+    result = await score_and_rank({**_SCORE_BASE_STATE, "hydrated_events": []})
     assert result["ranked_events"] == []
 
 
@@ -238,7 +259,7 @@ async def test_score_and_rank_empty_candidates_returns_empty(mock_fetch):
 async def test_score_and_rank_sets_response_string(mock_fetch):
     state = {
         **_SCORE_BASE_STATE,
-        "candidate_events": [_SCORE_BASE_STATE["candidate_events"][0]],
+        "hydrated_events": [_SCORE_BASE_STATE["hydrated_events"][0]],
     }
     result = await score_and_rank(state)
     assert "Top Pick" in result["response"]
@@ -302,10 +323,10 @@ async def test_score_and_rank_threads_user_coords_into_distance(mock_fetch):
         **_SCORE_BASE_STATE,
         "query_vector": [1.0, 0.0] + [0.0] * 1534,
         "taste_vector": None,
-        "candidate_events": [
-            {**_SCORE_BASE_STATE["candidate_events"][0], "id": "evt-a",
+        "hydrated_events": [
+            {**_SCORE_BASE_STATE["hydrated_events"][0], "id": "evt-a",
              "latitude": 36.16, "longitude": -115.14},   # Las Vegas (far)
-            {**_SCORE_BASE_STATE["candidate_events"][1], "id": "evt-b",
+            {**_SCORE_BASE_STATE["hydrated_events"][1], "id": "evt-b",
              "latitude": 34.05, "longitude": -118.24},   # Los Angeles (near)
         ],
         "user_lat": 34.05,

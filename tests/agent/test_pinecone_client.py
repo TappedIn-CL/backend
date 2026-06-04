@@ -7,6 +7,9 @@ from agent.pinecone_client import (
     fetch_vectors,
     delete_vectors,
     upcoming_only_filter,
+    happening_now_filter,
+    DEFAULT_EVENT_DURATION_HOURS,
+    HAPPENING_NOW_LOOKBACK_SECONDS,
 )
 
 MOCK_EVENT = {
@@ -43,6 +46,19 @@ def test_build_record_shape():
     assert record["metadata"]["tags"] == ["outdoor"]
     assert isinstance(record["metadata"]["start_time_unix"], int)
     assert record["metadata"]["start_time_unix"] > 0
+    # MOCK_EVENT has end_time → end_time_unix derived from it (4-hour event).
+    assert isinstance(record["metadata"]["end_time_unix"], int)
+    assert record["metadata"]["end_time_unix"] - record["metadata"]["start_time_unix"] == 4 * 3600
+
+
+def test_build_record_defaults_end_time_when_missing():
+    """When a source omits end_time, fall back to start + DEFAULT_EVENT_DURATION_HOURS.
+    Mirrors effective_end_time semantics so all three layers (ingest, query,
+    hydrate) agree on when an event is 'over'."""
+    event = {**MOCK_EVENT, "end_time": None}
+    record = _build_record(event, [0.1] * 1536)
+    delta = record["metadata"]["end_time_unix"] - record["metadata"]["start_time_unix"]
+    assert delta == DEFAULT_EVENT_DURATION_HOURS * 3600
 
 
 @patch("agent.pinecone_client._get_index")
@@ -115,6 +131,30 @@ def test_search_events_merges_user_filters_with_upcoming(mock_get_index):
     call_kwargs = mock_index.query.call_args[1]
     assert call_kwargs["filter"]["city"] == "Los Angeles"
     assert call_kwargs["filter"]["start_time_unix"]["$gte"] <= int(time.time())
+
+
+def test_happening_now_filter_window_shape():
+    f = happening_now_filter()
+    now = int(time.time())
+    window = f["start_time_unix"]
+    # Lenient window: events that started in the last 24h up to now.
+    assert window["$lte"] <= now
+    assert window["$gte"] >= now - HAPPENING_NOW_LOOKBACK_SECONDS - 5  # tolerance for time drift
+    assert window["$lte"] - window["$gte"] == HAPPENING_NOW_LOOKBACK_SECONDS
+
+
+@patch("agent.pinecone_client._get_index")
+def test_search_events_uses_happening_now_filter_when_mode_set(mock_get_index):
+    mock_index = MagicMock()
+    mock_index.query.return_value = {"matches": []}
+    mock_get_index.return_value = mock_index
+    search_events([0.1] * 1536, {}, top_k=5, time_mode="happening_now")
+    call_kwargs = mock_index.query.call_args[1]
+    window = call_kwargs["filter"]["start_time_unix"]
+    # happening_now mode wants events that already started (upper bound <= now),
+    # not events that haven't started (lower bound >= now from upcoming filter).
+    assert "$lte" in window
+    assert window["$lte"] <= int(time.time())
 
 
 @patch("agent.pinecone_client.time.sleep")

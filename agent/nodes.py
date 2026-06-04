@@ -221,8 +221,16 @@ async def retrieve_events(state: AgentState) -> AgentState:
 
     pinecone_filter = _to_pinecone_filter(state["filters"] or {})
 
-    # Over-fetch so dedup-by-title still leaves ~20 unique candidates.
-    matches = await asyncio.to_thread(search_events, vector, pinecone_filter, 40)
+    happening_now = bool(state.get("happening_now"))
+    time_mode = "happening_now" if happening_now else "upcoming"
+    # In happening_now mode the candidate pool is much smaller (only events
+    # currently in progress), and the lenient 24h window can return some that
+    # have already ended — which hydrate_events drops via effective_end_time.
+    # Over-fetch more so the post-filter dedup still leaves ~20 candidates.
+    top_k = 60 if happening_now else 40
+    matches = await asyncio.to_thread(
+        search_events, vector, pinecone_filter, top_k, time_mode
+    )
 
     # Dedup by title alone — Supabase has multiple rows for the same logical
     # event when the scraper re-runs against a new article URL (its source_id
@@ -372,8 +380,11 @@ async def hydrate_events(state: AgentState) -> AgentState:
             )
 
     except Exception as e:
-        logger.error("Hydration failed, returning sparse candidates: %s", e)
-        hydrated = list(candidates)
+        # Sparse Pinecone candidates have no start_time / description / address,
+        # so returning them to the UI produces broken-looking cards. Better to
+        # surface "no events found" honestly than to render empty placeholders.
+        logger.error("Hydration failed, returning empty: %s", e)
+        hydrated = []
 
     # Always drop events that have already ended; when the Happening Now toggle
     # is on, ALSO drop events that haven't started yet. This runs unconditionally
@@ -404,7 +415,11 @@ async def score_and_rank(state: AgentState) -> AgentState:
     unauthenticated user). Reads from hydrated_events when available so the
     ranked output carries full Supabase fields (description, vibe_tags, etc).
     """
-    candidates = state.get("hydrated_events") or state.get("candidate_events") or []
+    # Trust hydrated_events as the source of truth — never fall back to raw
+    # candidate_events. Those are sparse Pinecone metadata (no description /
+    # start_time / address), so rendering them produces broken cards AND
+    # bypasses the hydrate-layer time filter that drops past events.
+    candidates = state.get("hydrated_events") or []
     if not candidates:
         return {
             **state,
