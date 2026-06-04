@@ -191,12 +191,15 @@ def test_upcoming_keeps_a_future_date_from():
 # Layer 0 — request schema parses ui_filters and ignores extra fields
 # ──────────────────────────────────────────────────────────────────────────
 
-def test_schema_parses_ui_filters_and_ignores_latlng():
+def test_schema_parses_ui_filters_and_latlng_together():
+    # user_lat/user_lng are modeled on the request (distance scoring needs them);
+    # ui_filters lives alongside them. This test guards that both pipelines stay
+    # wired through the same payload without one clobbering the other.
     req = AgentQueryRequest.model_validate(
         {
             "query": "art events",
             "chips": ["Foodie"],
-            "user_lat": 34.07,  # frontend sends these; backend doesn't model them
+            "user_lat": 34.07,
             "user_lng": -118.44,
             "ui_filters": {
                 "category": "Arts",
@@ -210,7 +213,8 @@ def test_schema_parses_ui_filters_and_ignores_latlng():
     )
     assert req.ui_filters.category == "Arts"
     assert req.ui_filters.date_from == "2026-06-10"
-    assert not hasattr(req, "user_lat")
+    assert req.user_lat == 34.07
+    assert req.user_lng == -118.44
 
 
 def test_schema_ui_filters_optional():
@@ -382,9 +386,14 @@ _MATCHES = [
         },
     },
 ]
+# Future start_time on every row so hydrate_events' unconditional time filter
+# (drops events that have already ended) doesn't strip them before scoring.
+_FUTURE_START = (datetime.now() + timedelta(hours=2)).isoformat()
 _HYDRATION_ROWS = [
-    {"id": "evt-a", "title": "Gallery Opening", "description": "desc a", "latitude": None, "longitude": None},
-    {"id": "evt-b", "title": "Mural Tour", "description": "desc b", "latitude": None, "longitude": None},
+    {"id": "evt-a", "title": "Gallery Opening", "description": "desc a",
+     "latitude": None, "longitude": None, "start_time": _FUTURE_START, "end_time": None},
+    {"id": "evt-b", "title": "Mural Tour", "description": "desc b",
+     "latitude": None, "longitude": None, "start_time": _FUTURE_START, "end_time": None},
 ]
 _QUERY_VEC = [1.0, 0.0] + [0.0] * 1534
 _EVENT_VECS = {

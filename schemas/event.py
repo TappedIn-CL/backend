@@ -53,6 +53,7 @@ VibeTag = Literal[
 class EventCreate(BaseModel):
     title: str
     date: datetime
+    end_time: datetime | None = None
     cost: float = Field(ge=0)
     latitude: float | None = None
     longitude: float | None = None
@@ -72,6 +73,7 @@ class EventResponse(BaseModel):
     id: uuid.UUID
     title: str
     date: datetime
+    end_time: datetime | None = None
     cost: float
     latitude: float | None = None
     longitude: float | None = None

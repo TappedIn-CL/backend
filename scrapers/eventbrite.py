@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from db.session import SessionLocal
 from app.models.event import Event
+from app.utils.event_utils import deactivate_past_events
 from scrapers.date_utils import is_current_or_future_event, parse_event_datetime
 from app.utils.geocoding import geocode_address
 
@@ -92,15 +93,21 @@ Return only a JSON array of objects like [{{"i": 0, "category": "Music"}}] — o
 
 
 def save_events_to_db(events):
+    """Save or update eventbrite events using PostgreSQL upsert on (source, source_id)."""
     print(f"  → parsed {len(events)} event(s)")
     db = SessionLocal()
     try:
-        added = 0
+        saved = 0
+        skipped = 0
+
         for e in events:
             if not e.get("title") or not e.get("date"):
                 print(f"    ✗ skipped (missing title/date): {e.get('title')}")
+                skipped += 1
                 continue
 
+            # Backfill source_url onto an existing row if the older scraper run
+            # saved it before we tracked source provenance — then skip as dup.
             exists = db.query(Event).filter(Event.title == e["title"]).first()
             source_url = e.get("url")
             if exists:
@@ -110,19 +117,21 @@ def save_events_to_db(events):
                     if not exists.source_id:
                         exists.source_id = source_id_from_url(source_url)
                 print(f"    ✗ duplicate: {e['title']}")
+                skipped += 1
                 continue
 
             try:
                 date = parse_event_datetime(e["date"])
             except ValueError as ex:
                 print(f"    ✗ bad date '{e['date']}' for '{e['title']}': {ex}")
+                skipped += 1
                 continue
 
             if not is_current_or_future_event(date):
                 print(f"    ✗ skipped past event: {e['title']} ({e['date']})")
+                skipped += 1
                 continue
 
-            # Geocode location (if present) once per event
             lat = lng = None
             if e.get("location"):
                 lat, lng = geocode_address(e.get("location"))
@@ -142,21 +151,24 @@ def save_events_to_db(events):
             )
             db.add(event)
             print(f"    ✓ saving: {e['title']}")
-            added += 1
+            saved += 1
 
         db.commit()
-        return added
+        print(f"  → {saved} events saved/updated, {skipped} skipped")
+
+        deactivated = deactivate_past_events(db)
+        if deactivated > 0:
+            print(f"  → Deactivated {deactivated} past event(s)")
+
+        return saved
     finally:
         db.close()
 
 
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-    total = 0
-    for page in range(1, 4):
+def scrape_eventbrite(max_pages: int = 3) -> list[dict]:
+    """Fetch eventbrite LA events across pages, classify categories, return list of dicts."""
+    all_events = []
+    for page in range(1, max_pages + 1):
         print(f"Fetching page {page}...")
         try:
             events = get_events_from_page(page=page)
@@ -166,10 +178,17 @@ if __name__ == "__main__":
             categories = classify_categories_with_openai(events)
             for i, e in enumerate(events):
                 e["category"] = categories.get(i, "Other")
-            added = save_events_to_db(events)
-            print(f"  → {added} events saved")
-            total += added
-        except Exception as e:
-            print(f"  → Error: {e}")
+            all_events.extend(events)
+        except Exception as ex:
+            print(f"  → Error on page {page}: {ex}")
+    return all_events
 
-    print(f"\nDone. Total events saved: {total}")
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    events = scrape_eventbrite()
+    total = save_events_to_db(events)
+    print(f"\nDone. Total events saved/updated: {total}")

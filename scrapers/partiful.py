@@ -377,6 +377,12 @@ def save_events_to_db(events):
                 skipped += 1
                 continue
 
+            end_date_raw = event_data.get("end_date")
+            try:
+                event_end = parse_event_datetime(end_date_raw) if end_date_raw else None
+            except ValueError:
+                event_end = None
+
             source_id = str(event_data["source_id"])
             existing = db.query(Event).filter(
                 Event.source == "partiful",
@@ -387,6 +393,7 @@ def save_events_to_db(events):
                 "title": event_data["title"],
                 "description": event_data.get("description"),
                 "date": event_date,
+                "end_time": event_end,
                 "cost": event_data.get("cost") if event_data.get("cost") is not None else 0.0,
                 "location": event_data.get("location"),
                 "category": event_data.get("category") if event_data.get("category") in ALLOWED_EVENT_CATEGORIES else "Other",

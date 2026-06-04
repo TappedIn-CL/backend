@@ -1,14 +1,23 @@
 import asyncio
 import logging
+import math
 
 from agent.embedding import embed_text
-from agent.state import AgentState, EventSchema
+from agent.state import AgentState, EnrichedEvent, EventSchema
 from agent.pinecone_client import fetch_vectors
 
 logger = logging.getLogger(__name__)
 
 QUERY_WEIGHT = 0.7
 TASTE_WEIGHT = 0.3
+
+# Distance penalty: a far event is nudged down so a closer one with equal
+# semantic relevance ranks first. Provisional/untuned — these only take effect
+# once a caller passes user coordinates; with no coords the penalty is always 0
+# and ranking is identical to the pure-similarity blend.
+DISTANCE_WEIGHT = 0.2            # maximum penalty, applied at/over the reference distance
+DISTANCE_REFERENCE_MILES = 25.0  # distance at which the penalty saturates
+EARTH_RADIUS_MILES = 3958.8
 
 # Blend favorited-event vectors (behavioral signal) heavier than self-reported
 # interests text (declarative signal). Behavior beats stated preference but
@@ -24,6 +33,36 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+def haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance in miles between two lat/lng points."""
+    rlat1, rlng1, rlat2, rlng2 = map(math.radians, (lat1, lng1, lat2, lng2))
+    dlat = rlat2 - rlat1
+    dlng = rlng2 - rlng1
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlng / 2) ** 2
+    return 2 * EARTH_RADIUS_MILES * math.asin(min(1.0, math.sqrt(a)))
+
+
+def distance_penalty(
+    user_lat: float | None,
+    user_lng: float | None,
+    event_lat: float | None,
+    event_lng: float | None,
+) -> float:
+    """Penalty in [0, DISTANCE_WEIGHT] for how far an event is from the user.
+
+    Returns 0.0 when the user shared no location, or when the event has no
+    coordinates. (0.0, 0.0) is the sentinel for missing coords in sparse
+    Pinecone metadata, so it is treated as "no coordinates" rather than a real
+    point in the Atlantic.
+    """
+    if user_lat is None or user_lng is None:
+        return 0.0
+    if not event_lat or not event_lng:
+        return 0.0
+    miles = haversine_miles(user_lat, user_lng, event_lat, event_lng)
+    return DISTANCE_WEIGHT * min(miles / DISTANCE_REFERENCE_MILES, 1.0)
 
 
 def _l2_normalize(v: list[float]) -> list[float]:
@@ -121,26 +160,45 @@ def score_events(
     taste_vector: list[float] | None,
     events: list[EventSchema],
     event_vectors: dict[str, list[float]],
-) -> list[EventSchema]:
-    """Rank events by 0.7*cosine(query, event) + 0.3*cosine(taste, event). Falls back to query-only when taste_vector is None. Events missing from event_vectors are dropped.
+    user_lat: float | None = None,
+    user_lng: float | None = None,
+) -> list[EnrichedEvent]:
+    """Rank events by final_score = blended_similarity - distance_penalty, where
+    blended = 0.7*cosine(query, event) + 0.3*cosine(taste, event) (query-only
+    when taste_vector is None). Events missing from event_vectors are dropped.
 
-    Returns each event with a "score" field attached (blended cosine score) so
-    downstream consumers (UI, agent response) can display ranking confidence.
+    Each returned event carries:
+      - "score": the final_score it was ranked on
+      - "score_breakdown": {query_sim, taste_sim, distance_penalty, final_score}
+
+    Backward-compat: with no user location, distance_penalty is 0.0 for every
+    event, so final_score == blended and ranking is identical to before.
     """
-    scored = []
+    scored: list[tuple[float, EnrichedEvent]] = []
     for event in events:
         ev = event_vectors.get(event["id"])
         if ev is None:
             continue
-        query_score = cosine_similarity(query_vector, ev)
+        query_sim = cosine_similarity(query_vector, ev)
         if taste_vector is not None:
-            taste_score = cosine_similarity(taste_vector, ev)
-            blended = QUERY_WEIGHT * query_score + TASTE_WEIGHT * taste_score
+            taste_sim = cosine_similarity(taste_vector, ev)
+            blended = QUERY_WEIGHT * query_sim + TASTE_WEIGHT * taste_sim
         else:
-            blended = query_score
-        scored.append((blended, event))
+            taste_sim = 0.0
+            blended = query_sim
+        penalty = distance_penalty(
+            user_lat, user_lng, event.get("latitude"), event.get("longitude")
+        )
+        final_score = blended - penalty
+        breakdown = {
+            "query_sim": query_sim,
+            "taste_sim": taste_sim,
+            "distance_penalty": penalty,
+            "final_score": final_score,
+        }
+        scored.append((final_score, {**event, "score": final_score, "score_breakdown": breakdown}))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [{**event, "score": score} for score, event in scored]
+    return [enriched for _, enriched in scored]
 
 
 async def compute_taste(state: AgentState) -> AgentState:

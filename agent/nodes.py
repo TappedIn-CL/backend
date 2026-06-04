@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 from openai import AsyncOpenAI
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 HYDRATION_TIMEOUT_SECONDS = 5.0
 MAX_HYDRATION_BATCH = 100
+
+# Time filter config — matches scrapers/run_cleanup.GRACE_HOURS and
+# app/utils/event_utils.DEFAULT_EVENT_DURATION_HOURS so an event's "is over"
+# determination is identical at scrape time, cleanup time, and query time.
+DEFAULT_EVENT_DURATION_HOURS = 3
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # Reuse OpenAI client pattern from embedding.py
 _chat_client: AsyncOpenAI | None = None
@@ -63,6 +70,10 @@ Chip phrase mappings:
 - "thrifty" / "cheap" → price_max: 20
 - "free" → price_max: 0
 
+Also extract:
+- time_intent: The user's temporal intent — exactly one of "now", "today", "tonight", "this_weekend", "this_week", "upcoming", or null if no time is implied. Use "now" only when the user wants something happening right at this moment.
+- confidence: Your confidence from 0.0 to 1.0 that you correctly understood what the user is looking for. Use lower values for vague or ambiguous queries.
+
 Respond with valid JSON structure only, no additional text.
 """.format(
     categories=", ".join(CATEGORIES),
@@ -76,12 +87,36 @@ Example:
 Query: "chill outdoor jazz under $20 this weekend within 10 miles"
 {{
   "semantic_query": "chill outdoor jazz music event",
-  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"]}}
+  "filters": {{"price_max": 20, "max_distance": 10, "age_restrictions": "21+", "categories": ["Music"], "vibes": ["chill"], "tags": ["outdoor"]}},
+  "time_intent": "this_weekend",
+  "confidence": 0.9
 }}
 
 """
 
 IntentExtraction = dict[str, str | dict[str, list[str] | float | None]]
+
+# Allowed temporal intents — mirrors agent.state.TimeIntent. Anything else from
+# the LLM is coerced to None so a hallucinated value never reaches downstream
+# time-window logic.
+VALID_TIME_INTENTS = {"now", "today", "tonight", "this_weekend", "this_week", "upcoming"}
+
+
+def _coerce_time_intent(value) -> str | None:
+    # isinstance guard first: a non-string (e.g. a list from malformed LLM JSON)
+    # would raise TypeError on `value in <set>` and is never a valid intent.
+    return value if isinstance(value, str) and value in VALID_TIME_INTENTS else None
+
+
+def _clamp_confidence(value) -> float | None:
+    """Clamp a self-reported confidence into [0, 1]; None when unparseable/absent."""
+    if value is None:
+        return None
+    try:
+        c = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(1.0, c))
 
 
 async def parse_intent(state: AgentState) -> AgentState:
@@ -116,6 +151,9 @@ async def parse_intent(state: AgentState) -> AgentState:
             "tags": filters.get("tags", []) or [],
         }
 
+        time_intent = _coerce_time_intent(result.get("time_intent"))
+        confidence = _clamp_confidence(result.get("confidence"))
+
     except Exception as e:
         logger.warning("parse_intent LLM call failed, falling back: %s", e)
         semantic_query = query
@@ -127,6 +165,10 @@ async def parse_intent(state: AgentState) -> AgentState:
             "vibes": [],
             "tags": [],
         }
+        time_intent = None
+        # 0.0 (not None) so the future clarify node treats a total parse failure
+        # as low-confidence and short-circuits to ask the user for clarification.
+        confidence = 0.0
 
     # Fold the frontend's selected chips into both the embedding signal and the
     # category filter. Chip vibe_tags intentionally land in the embedding (via
@@ -151,6 +193,12 @@ async def parse_intent(state: AgentState) -> AgentState:
         "semantic_query": semantic_query,
         "query_vector": query_vector,
         "filters": structured_filters,
+        "time_intent": time_intent,
+        # Explicit toggle from the Happening Now button wins. The LLM-inferred
+        # time_intent == "now" can still flip it ON for queries like "music
+        # right now" without the toggle, but never OFF if the user toggled it.
+        "happening_now": bool(state.get("happening_now")) or (time_intent == "now"),
+        "confidence": confidence,
     }
 
 
@@ -282,8 +330,16 @@ async def retrieve_events(state: AgentState) -> AgentState:
     merged_filters = _merge_ui_filters(state["filters"] or {}, state.get("ui_filters"))
     pinecone_filter = _to_pinecone_filter(merged_filters)
 
-    # Over-fetch so dedup-by-title still leaves ~20 unique candidates.
-    matches = await asyncio.to_thread(search_events, vector, pinecone_filter, 40)
+    happening_now = bool(state.get("happening_now"))
+    time_mode = "happening_now" if happening_now else "upcoming"
+    # In happening_now mode the candidate pool is much smaller (only events
+    # currently in progress), and the lenient 24h window can return some that
+    # have already ended — which hydrate_events drops via effective_end_time.
+    # Over-fetch more so the post-filter dedup still leaves ~20 candidates.
+    top_k = 60 if happening_now else 40
+    matches = await asyncio.to_thread(
+        search_events, vector, pinecone_filter, top_k, time_mode
+    )
 
     # Dedup by title alone — Supabase has multiple rows for the same logical
     # event when the scraper re-runs against a new article URL (its source_id
@@ -325,6 +381,46 @@ async def retrieve_events(state: AgentState) -> AgentState:
         "query_vector": vector,
         "candidate_events": candidate_events,
     }
+
+
+def _passes_time_filter(event: EventSchema, now_la: datetime, happening_now: bool) -> bool:
+    """Drop events that have already ended; when happening_now is True, also drop
+    events that haven't started yet.
+
+    Uses the hydrated event's `end_time` when present (populated by Allen's
+    effective_end_time helper in event_to_hydrated). Falls back to
+    start + DEFAULT_EVENT_DURATION_HOURS when end_time is None/empty so this
+    works against legacy rows whose end_time column is still NULL.
+
+    Datetimes are compared as naive LA-local, matching Supabase's storage
+    convention. Bad/missing start_time → drop (can't reason about timing).
+    """
+    start_str = event.get("start_time")
+    if not start_str:
+        return False
+    try:
+        start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+        if start.tzinfo is not None:
+            start = start.astimezone(LOCAL_TZ).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return False
+
+    end_str = event.get("end_time")
+    end: datetime | None = None
+    if end_str:
+        try:
+            end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            if end.tzinfo is not None:
+                end = end.astimezone(LOCAL_TZ).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            end = None
+    if end is None:
+        end = start + timedelta(hours=DEFAULT_EVENT_DURATION_HOURS)
+
+    if happening_now:
+        return start <= now_la <= end
+    # Default: just hide events that are over.
+    return end >= now_la
 
 
 async def hydrate_events(state: AgentState) -> AgentState:
@@ -393,8 +489,26 @@ async def hydrate_events(state: AgentState) -> AgentState:
             )
 
     except Exception as e:
-        logger.error("Hydration failed, returning sparse candidates: %s", e)
-        hydrated = list(candidates)
+        # Sparse Pinecone candidates have no start_time / description / address,
+        # so returning them to the UI produces broken-looking cards. Better to
+        # surface "no events found" honestly than to render empty placeholders.
+        logger.error("Hydration failed, returning empty: %s", e)
+        hydrated = []
+
+    # Always drop events that have already ended; when the Happening Now toggle
+    # is on, ALSO drop events that haven't started yet. This runs unconditionally
+    # because past events polluting default search results was the user-facing
+    # bug — Happening Now is a stricter version of the same filter.
+    now_la = datetime.now(LOCAL_TZ).replace(tzinfo=None)
+    happening_now = bool(state.get("happening_now"))
+    before = len(hydrated)
+    hydrated = [e for e in hydrated if _passes_time_filter(e, now_la, happening_now)]
+    dropped = before - len(hydrated)
+    if dropped:
+        logger.info(
+            "hydrate_events: time filter dropped %d/%d events (happening_now=%s)",
+            dropped, before, happening_now,
+        )
 
     return {**state, "hydrated_events": hydrated}
 
@@ -410,11 +524,16 @@ async def score_and_rank(state: AgentState) -> AgentState:
     unauthenticated user). Reads from hydrated_events when available so the
     ranked output carries full Supabase fields (description, vibe_tags, etc).
     """
-    candidates = state.get("hydrated_events") or state.get("candidate_events") or []
+    # Trust hydrated_events as the source of truth — never fall back to raw
+    # candidate_events. Those are sparse Pinecone metadata (no description /
+    # start_time / address), so rendering them produces broken cards AND
+    # bypasses the hydrate-layer time filter that drops past events.
+    candidates = state.get("hydrated_events") or []
     if not candidates:
         return {
             **state,
             "ranked_events": [],
+            "enriched_events": [],
             "response": f"No events found for '{state['query']}'.",
         }
 
@@ -426,12 +545,20 @@ async def score_and_rank(state: AgentState) -> AgentState:
     event_ids = [e["id"] for e in candidates]
     try:
         event_vectors = await asyncio.to_thread(fetch_vectors, event_ids)
-        ranked = score_events(query_vector, taste_vector, candidates, event_vectors)
+        ranked = score_events(
+            query_vector,
+            taste_vector,
+            candidates,
+            event_vectors,
+            state.get("user_lat"),
+            state.get("user_lng"),
+        )
     except Exception as e:
         logger.error("Scoring failed, returning unranked candidates: %s", e)
         return {
             **state,
             "ranked_events": list(candidates),
+            "enriched_events": [],
             "response": f"Found {len(candidates)} events for '{state['query']}' (ranking unavailable).",
         }
 
@@ -443,4 +570,7 @@ async def score_and_rank(state: AgentState) -> AgentState:
     else:
         response = f"No scoreable events found for '{state['query']}'."
 
-    return {**state, "ranked_events": ranked, "response": response}
+    # ranked is already list[EnrichedEvent] (each carries score + score_breakdown).
+    # ranked_events keeps its existing consumers working (additive score_breakdown
+    # key); enriched_events is the typed view downstream owners build on.
+    return {**state, "ranked_events": ranked, "enriched_events": ranked, "response": response}

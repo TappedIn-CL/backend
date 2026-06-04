@@ -36,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Files in the scrapers folder that are not scrapers
-_SKIP = {"run_pipeline", "date_utils", "__init__"}
+_SKIP = {"run_pipeline", "run_cleanup", "date_utils", "__init__"}
 
 
 def _discover_scrapers() -> list[tuple[str, callable]]:
