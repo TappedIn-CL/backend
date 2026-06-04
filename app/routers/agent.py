@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from agent.graph import agent
 from agent.state import initial_state
 from app.services.popular import popular_events
+from app.services.discovery import happening_today_events, recently_posted_events
 from agent.recommendations import recommend_for_you
 from auth.profile import get_user_profile_optional, get_user_profile_required
 from db.dependencies import get_db
@@ -99,6 +100,46 @@ async def popular(
     """
     start_time = time.time()
     events = await popular_events(db, limit=limit)
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {
+        "events": events,
+        "count": len(events),
+        "latency_ms": latency_ms,
+    }
+
+
+@router.get("/happening-today")
+async def happening_today(
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Events scheduled for the current LA calendar date, soonest first.
+
+    Match is date-only (any hour today) — Rohan's product call for the For You
+    'Happening Now' rail. No auth required so the rail can render before login.
+    """
+    start_time = time.time()
+    events = await happening_today_events(db, limit=limit)
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {
+        "events": events,
+        "count": len(events),
+        "latency_ms": latency_ms,
+    }
+
+
+@router.get("/recently-posted")
+async def recently_posted(
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    """Most-recently-added upcoming events, newest-first by created_at.
+
+    Powers the For You 'Recently Posted Events' rail. Scoped to upcoming
+    events so the rail doesn't surface freshly-scraped past events.
+    """
+    start_time = time.time()
+    events = await recently_posted_events(db, limit=limit)
     latency_ms = int((time.time() - start_time) * 1000)
     return {
         "events": events,
