@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from agent.state import AgentState, EventSchema
 from agent.embedding import embed_query
+from agent.chip_mapping import merge_chips_into_query, chips_to_categories
 from agent.pinecone_client import fetch_vectors, search_events
 from agent.scoring import score_events
 from agent.taxonomy import CATEGORIES, SPECIAL_TAGS, VIBE_TAGS
@@ -169,6 +170,22 @@ async def parse_intent(state: AgentState) -> AgentState:
         # as low-confidence and short-circuits to ask the user for clarification.
         confidence = 0.0
 
+    # Fold the frontend's selected chips into both the embedding signal and the
+    # category filter. Chip vibe_tags intentionally land in the embedding (via
+    # each chip's semantic_phrase) rather than a Pinecone filter — vibe_tags are
+    # not stored in Pinecone metadata, so a $in on them would match zero events.
+    # Chip categories ARE filterable, so union them onto whatever the LLM
+    # inferred. Done outside the try/except so chips still apply if the LLM call
+    # failed. Unmapped chips (e.g. "Happening Now") are ignored by the helpers.
+    chips = state.get("chips") or []
+    semantic_query = merge_chips_into_query(semantic_query, chips)
+    chip_categories = chips_to_categories(chips)
+    if chip_categories:
+        existing_cats = structured_filters.get("categories") or []
+        structured_filters["categories"] = list(
+            dict.fromkeys([*existing_cats, *chip_categories])
+        )
+
     query_vector = await asyncio.to_thread(embed_query, semantic_query)
 
     return {
@@ -185,26 +202,117 @@ async def parse_intent(state: AgentState) -> AgentState:
     }
 
 
+def _merge_ui_filters(filters: dict, ui: dict | None) -> dict:
+    """
+    Fold explicit FilterModal selections into the LLM-parsed filters.
+
+    UI selections are deterministic user constraints, so they win over whatever
+    parse_intent inferred from the free-text query. Category labels arrive
+    already aligned to taxonomy.CATEGORIES (FilterModal sends "Arts", "Music",
+    ...), so they map straight onto the Pinecone `category` $in clause. Price
+    fields are only present when the user narrowed that side of the slider
+    (the frontend omits untouched bounds), so a plain merge is correct.
+    """
+    if not ui:
+        return filters
+    merged = dict(filters)
+    category = ui.get("category")
+    if category and category != "All":
+        merged["categories"] = [category]
+    if ui.get("price_min") is not None:
+        merged["price_min"] = ui["price_min"]
+    if ui.get("price_max") is not None:
+        merged["price_max"] = ui["price_max"]
+    if ui.get("show_free_only"):
+        merged["show_free_only"] = True
+    if ui.get("date_from"):
+        merged["date_from"] = ui["date_from"]
+    if ui.get("date_to"):
+        merged["date_to"] = ui["date_to"]
+    return merged
+
+
+def _iso_date_to_unix(iso: str, *, end_of_day: bool = False) -> int | None:
+    """Convert a "YYYY-MM-DD" UI date to a unix timestamp.
+
+    `date_to` is inclusive of the whole selected day, so end_of_day pushes it to
+    23:59:59 of that date. Returns None on a malformed string so a bad value
+    drops the bound instead of raising.
+    """
+    try:
+        dt = datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return None
+    if end_of_day:
+        dt = dt + timedelta(days=1) - timedelta(seconds=1)
+    return int(dt.timestamp())
+
+
+def _price_filter(raw: dict) -> dict:
+    """
+    Translate price intent into Pinecone metadata clauses using OVERLAP
+    semantics: an event matches the budget band [price_min, price_max] when its
+    own [price_min, price_max] range intersects it.
+
+    The field-flip is intentional and IS the intersection test — do not
+    "correct" it to same-name clauses:
+      - the filter's MAX constrains the event's MIN (cheapest tier <= ceiling)
+      - the filter's MIN constrains the event's MAX (top tier >= floor)
+    Each side is only emitted when the user narrowed it, so an untouched slider
+    adds no price constraint at all.
+
+    "Free" is special-cased to price_max == 0 (matching formatPriceRange and the
+    show_free_only toggle) so a $0 budget ceiling — whether from the free toggle,
+    the slider dragged to 0, or the LLM emitting price_max=0 for "free" — means
+    truly free, not the looser "has a free tier" the overlap rule would give.
+    """
+    price_max = raw.get("price_max")
+    if raw.get("show_free_only") or price_max == 0:
+        return {"price_max": {"$eq": 0}}
+    f: dict = {}
+    if price_max is not None:                      # filter upper bound was narrowed
+        f["price_min"] = {"$lte": price_max}       # event's cheapest tier <= budget ceiling
+    if raw.get("price_min") is not None:           # filter lower bound was narrowed
+        f["price_max"] = {"$gte": raw["price_min"]}  # event's top tier >= budget floor
+    return f
+
+
 def _to_pinecone_filter(raw: dict) -> dict:
     """
-    Translate parse_intent's structured filters into Pinecone's MongoDB-style
-    filter operators.
+    Translate structured filters (LLM-parsed + merged UI) into Pinecone's
+    MongoDB-style filter operators.
 
     Pinecone metadata fields (from _build_record): start_time_unix, latitude,
     longitude, price_min, price_max, city, category (singular!), tags, title,
     venue_name. Anything else is dropped — max_distance and age_restrictions
     are NOT Pinecone-filterable and would need post-query handling on lat/lng
-    or as tag matches respectively.
+    or as tag matches respectively. Pinecone implicitly ANDs the top-level keys.
     """
     f: dict = {}
-    if raw.get("price_max") is not None:
-        f["price_max"] = {"$lte": raw["price_max"]}
+    f.update(_price_filter(raw))
     categories = raw.get("categories") or []
     if categories:
         f["category"] = {"$in": categories}
     tags = raw.get("tags") or []
     if tags:
         f["tags"] = {"$in": tags}
+    # Date range → start_time_unix bounds. upcoming_only_filter merges these
+    # with its "not yet started" floor (keeping the later $gte), so a past
+    # date_from can't surface events that already happened.
+    date_from = raw.get("date_from")
+    date_to = raw.get("date_to")
+    if date_from or date_to:
+        rng: dict = {}
+        if date_from:
+            lo = _iso_date_to_unix(date_from)
+            if lo is not None:
+                rng["$gte"] = lo
+        if date_to:
+            hi = _iso_date_to_unix(date_to, end_of_day=True)
+            if hi is not None:
+                rng["$lte"] = hi
+        if rng:
+            f["start_time_unix"] = rng
     return f
 
 
@@ -219,7 +327,8 @@ async def retrieve_events(state: AgentState) -> AgentState:
         query_text = state["semantic_query"] or state["query"]
         vector = await asyncio.to_thread(embed_query, query_text)
 
-    pinecone_filter = _to_pinecone_filter(state["filters"] or {})
+    merged_filters = _merge_ui_filters(state["filters"] or {}, state.get("ui_filters"))
+    pinecone_filter = _to_pinecone_filter(merged_filters)
 
     happening_now = bool(state.get("happening_now"))
     time_mode = "happening_now" if happening_now else "upcoming"

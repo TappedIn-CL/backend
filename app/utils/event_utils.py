@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models.event import Event
+from app.utils.datetime_format import format_stored_event_datetime
 from schemas.event import HydratedEventResponse
 
 
@@ -26,10 +27,11 @@ def effective_end_time(event: Event) -> datetime | None:
 
 
 def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEventResponse:
-    # latitude/longitude/image_url are demo placeholders — the Event model
-    # doesn't store them yet. The frontend tolerates None.
-    # end_time defaults to start + 3h via effective_end_time when not stored.
+    # image_url is a demo placeholder — the Event model doesn't store it yet.
     # venue_name and address both map from `location` for the demo.
+    # end_time defaults to start + 3h via effective_end_time when the source
+    # didn't supply one (Allen's helper) — propagate it through so the frontend
+    # and hydrate-layer time filter both see a non-null end.
     end_time = effective_end_time(event)
     return HydratedEventResponse(
         id=event.id,
@@ -41,12 +43,12 @@ def event_to_hydrated(event: Event, score: float | None = None) -> HydratedEvent
         venue_name=event.location,
         address=event.location,
         city="Los Angeles",
-        latitude=None,
-        longitude=None,
+        latitude=event.latitude,
+        longitude=event.longitude,
         price_min=event.cost,
         price_max=event.cost,
-        start_time=event.date.isoformat() if event.date else None,
-        end_time=end_time.isoformat() if end_time else None,
+        start_time=format_stored_event_datetime(event.date),
+        end_time=format_stored_event_datetime(end_time),
         image_url=None,
         source_url=event.source_url,
         score=score,

@@ -104,26 +104,30 @@ async def test_retrieve_events_empty_pinecone_returns_empty_candidates(mock_embe
 @patch("agent.nodes.embed_query", return_value=[0.2] * 1536)
 async def test_retrieve_events_passes_filters_to_search(mock_embed, mock_search):
     # parse_intent emits raw values; retrieve_events translates them into Pinecone's
-    # MongoDB-style filter operators before calling search_events.
+    # MongoDB-style filter operators before calling search_events. A budget ceiling
+    # of price_max=0 means "free", which maps to price_max == 0 (not $lte).
     state_with_filters = {
         **BASE_STATE,
         "filters": {"price_max": 0, "categories": ["Music"], "tags": ["outdoor"]},
     }
     await retrieve_events(state_with_filters)
-    mock_search.assert_called_once_with(
-        [0.2] * 1536,
-        {
-            "price_max": {"$lte": 0},
-            "category": {"$in": ["Music"]},
-            "tags": {"$in": ["outdoor"]},
-        },
-        40,            # default-path top_k (60 in happening_now mode)
-        "upcoming",    # time_mode — happening_now flag is False in BASE_STATE
-    )
+    # Destructure so additional positional args (top_k, time_mode) don't break
+    # the assertion. price_max=0 → "free" → $eq:0 per _price_filter.
+    vector_arg, filter_arg, *rest = mock_search.call_args.args
+    assert vector_arg == [0.2] * 1536
+    assert filter_arg == {
+        "price_max": {"$eq": 0},
+        "category": {"$in": ["Music"]},
+        "tags": {"$in": ["outdoor"]},
+    }
+    # Default-path retrieve_events also passes top_k=40 and time_mode="upcoming".
+    assert rest == [40, "upcoming"]
 
 
 @pytest.mark.anyio
-async def test_hydrate_events_calls_db_and_merges():
+async def test_hydrate_events_calls_backend_and_merges():
+    # hydrate_events fetches full rows from the backend over httpx
+    # (GET /events/by-ids) and merges them onto the sparse Pinecone candidates.
     from unittest.mock import MagicMock, AsyncMock
     from datetime import datetime, timedelta
     import uuid
@@ -153,6 +157,8 @@ async def test_hydrate_events_calls_db_and_merges():
     }
 
     # hydrate_events calls GET /events/by-ids via httpx; patch the AsyncClient.
+    # full_row carries a future start_time so the unconditional time filter in
+    # hydrate_events doesn't drop the merged row.
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json = MagicMock(return_value=[full_row])

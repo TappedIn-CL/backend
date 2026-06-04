@@ -134,10 +134,12 @@ def save_events_to_db(events, article_url):
             insert_stmt = text("""
                 INSERT INTO events 
                     (id, title, description, date, cost, location, category, 
-                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude)
+                     special_tags, vibe_tags, source, source_id, source_url,
+                     created_at, latitude, longitude)
                 VALUES 
                     (:id, :title, :description, :date, :cost, :location, :category,
-                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude)
+                     :special_tags, :vibe_tags, :source, :source_id, :source_url,
+                     :created_at, :latitude, :longitude)
                 ON CONFLICT (source, source_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     description = EXCLUDED.description,
@@ -147,6 +149,7 @@ def save_events_to_db(events, article_url):
                     category = EXCLUDED.category,
                     special_tags = EXCLUDED.special_tags,
                     vibe_tags = EXCLUDED.vibe_tags,
+                    source_url = EXCLUDED.source_url,
                     latitude = EXCLUDED.latitude,
                     longitude = EXCLUDED.longitude
             """)
@@ -169,6 +172,7 @@ def save_events_to_db(events, article_url):
                     "vibe_tags": vibe_tags_str,
                     "source": "uncoverla",
                     "source_id": source_id,
+                    "source_url": article_url,
                     "created_at": datetime.utcnow(),
                     "latitude": lat,
                     "longitude": lng,

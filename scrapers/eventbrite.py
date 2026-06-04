@@ -4,12 +4,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import json
 import hashlib
-import uuid
-from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import text
 from openai import OpenAI
+from urllib.parse import urlparse
 
 from db.session import SessionLocal
 from app.models.event import Event
@@ -22,6 +20,12 @@ headers = {
 }
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def source_id_from_url(url: str) -> str:
+    path = urlparse(url).path.rstrip("/")
+    event_slug = path.rsplit("/", 1)[-1]
+    return event_slug if event_slug else hashlib.md5(path.encode()).hexdigest()
 
 
 def get_events_from_page(city_slug="ca--los-angeles", page=1):
@@ -102,6 +106,20 @@ def save_events_to_db(events):
                 skipped += 1
                 continue
 
+            # Backfill source_url onto an existing row if the older scraper run
+            # saved it before we tracked source provenance — then skip as dup.
+            exists = db.query(Event).filter(Event.title == e["title"]).first()
+            source_url = e.get("url")
+            if exists:
+                if source_url and not exists.source_url:
+                    exists.source_url = source_url
+                    exists.source = exists.source or "eventbrite"
+                    if not exists.source_id:
+                        exists.source_id = source_id_from_url(source_url)
+                print(f"    ✗ duplicate: {e['title']}")
+                skipped += 1
+                continue
+
             try:
                 date = parse_event_datetime(e["date"])
             except ValueError as ex:
@@ -114,57 +132,26 @@ def save_events_to_db(events):
                 skipped += 1
                 continue
 
-            # Stable source_id: prefer event URL (unique per eventbrite event),
-            # fall back to title|date if URL missing.
-            id_source = e.get("url") or f"{e['title']}|{e['date']}"
-            source_id = hashlib.md5(id_source.encode()).hexdigest()
-
             lat = lng = None
             if e.get("location"):
                 lat, lng = geocode_address(e.get("location"))
 
-            insert_stmt = text("""
-                INSERT INTO events
-                    (id, title, description, date, cost, location, category,
-                     special_tags, vibe_tags, source, source_id, created_at, latitude, longitude)
-                VALUES
-                    (:id, :title, :description, :date, :cost, :location, :category,
-                     :special_tags, :vibe_tags, :source, :source_id, :created_at, :latitude, :longitude)
-                ON CONFLICT (source, source_id) DO UPDATE SET
-                    title = EXCLUDED.title,
-                    description = EXCLUDED.description,
-                    date = EXCLUDED.date,
-                    cost = EXCLUDED.cost,
-                    location = EXCLUDED.location,
-                    category = EXCLUDED.category,
-                    special_tags = EXCLUDED.special_tags,
-                    vibe_tags = EXCLUDED.vibe_tags,
-                    latitude = EXCLUDED.latitude,
-                    longitude = EXCLUDED.longitude
-            """)
-
-            try:
-                db.execute(insert_stmt, {
-                    "id": uuid.uuid4(),
-                    "title": e["title"],
-                    "description": e.get("description"),
-                    "date": date,
-                    "cost": 0.0,
-                    "location": e.get("location"),
-                    "category": e.get("category"),
-                    "special_tags": None,
-                    "vibe_tags": None,
-                    "source": "eventbrite",
-                    "source_id": source_id,
-                    "created_at": datetime.utcnow(),
-                    "latitude": lat,
-                    "longitude": lng,
-                })
-                print(f"    ✓ saved/updated: {e['title']}")
-                saved += 1
-            except Exception as ex:
-                print(f"    ✗ error saving '{e.get('title')}': {ex}")
-                skipped += 1
+            event = Event(
+                title=e["title"],
+                description=e.get("description"),
+                date=date,
+                cost=0.0,
+                location=e.get("location"),
+                latitude=lat,
+                longitude=lng,
+                category=e.get("category"),
+                source="eventbrite",
+                source_id=source_id_from_url(source_url) if source_url else None,
+                source_url=source_url,
+            )
+            db.add(event)
+            print(f"    ✓ saving: {e['title']}")
+            saved += 1
 
         db.commit()
         print(f"  → {saved} events saved/updated, {skipped} skipped")

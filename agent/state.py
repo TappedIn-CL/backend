@@ -46,6 +46,7 @@ class AgentState(TypedDict):
     chips: list[str]                    # selected mood chips from frontend (e.g. ["Chill", "Foodie"])
     semantic_query: str                 # cleaned + chip-enriched text for embedding
     filters: dict[str, Any]            # extracted structured filters (price, date, distance, categories — NO vibes)
+    ui_filters: Optional[dict]         # raw FilterModal selections; override LLM-parsed filters in retrieve_events
     query_vector: Optional[list[float]] # embedded semantic_query
     candidate_events: list[EventSchema] # top-K results from Pinecone (sparse metadata)
     hydrated_events: list[EventSchema]  # candidate_events + full Supabase rows
@@ -69,6 +70,7 @@ def initial_state(
     user_lat: Optional[float],
     user_lng: Optional[float],
     happening_now: bool = False,
+    ui_filters: Optional[dict] = None,
 ) -> AgentState:
     """Build the seed AgentState for a fresh agent run.
 
@@ -79,12 +81,17 @@ def initial_state(
     `happening_now` is the explicit toggle from the Happening Now button. Pass
     False when the caller has no signal — parse_intent may still flip it true
     via LLM-inferred time_intent == "now".
+
+    `ui_filters` is the raw FilterModal selections (price, date, category).
+    retrieve_events folds them over the LLM-parsed filters as authoritative
+    user constraints. None means the frontend didn't open the filter modal.
     """
     return {
         "query": query,
         "chips": chips,
         "semantic_query": "",
         "filters": {},
+        "ui_filters": ui_filters,
         "query_vector": None,
         "candidate_events": [],
         "hydrated_events": [],
